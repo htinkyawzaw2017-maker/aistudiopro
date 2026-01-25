@@ -3,4 +3,3 @@ google-generativeai
 edge-tts
 ffmpeg-python
 Pillow
-asyncio
