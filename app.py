@@ -118,16 +118,23 @@ def generate_content_with_retry(model, content, retries=3):
 # ---------------------------------------------------------
 # 🎬 PROCESSING WORKFLOW (SYNC FIXED)
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 🎬 PROCESSING WORKFLOW (ANY LENGTH SYNC)
+# ---------------------------------------------------------
 def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
     check_ffmpeg()
     
-    # 1. Get Duration EARLY
+    # 1. DYNAMIC DURATION CHECK (အလိုအလျောက် အချိန်တိုင်းခြင်း)
     duration_sec = get_duration(video_path)
-    duration_min = round(duration_sec / 60, 2)
-    st.info(f"⏱️ Video Duration: {duration_min} minutes ({int(duration_sec)}s)")
+    duration_min = duration_sec / 60
+    
+    # Estimate Word Count (Average speaking rate: 130 words per minute for Burmese)
+    target_word_count = int(duration_min * 130)
+    
+    st.info(f"⏱️ Video Length: {int(duration_min)}m {int(duration_sec % 60)}s (Targeting ~{target_word_count} words)")
 
     # --- 2. UPLOAD ---
-    st.info(f"🔹 Step 1: Uploading to Google AI...")
+    st.info(f"🔹 Step 1: Uploading Video...")
     genai.configure(api_key=api_key)
     video_file = genai.upload_file(video_path)
     
@@ -138,30 +145,32 @@ def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
         if time.time() - start > 600: raise Exception("Timeout error.")
     if video_file.state.name == "FAILED": raise Exception("Upload failed.")
 
-    # --- 3. GENERATE SCRIPT (SMART PROMPT) ---
-    st.info(f"🔹 Step 2: Translating & Writing Script...")
+    # --- 3. GENERATE SCRIPT (EXACT TIMING PROMPT) ---
+    st.info(f"🔹 Step 2: Writing Script to match {int(duration_sec)}s...")
     
     model = genai.GenerativeModel(model_id)
     
-    # 🔥 PROMPT: Numbers, Units, and Time Sync 🔥
+    # 🔥 PROMPT: Time & Speed Control 🔥
     prompt = f"""
-    Act as a professional Myanmar Dubbing Artist.
-    The video is exactly {int(duration_sec)} seconds long.
+    Act as a professional Dubbing Director.
+    Video Duration: EXACTLY {int(duration_sec)} seconds.
     
-    Your Task: Translate the dialogue into natural spoken Burmese.
-
-    CRITICAL RULES:
-    1. **NUMBERS**: Write numbers as words.
-       - "10000" -> "တစ်သောင်း"
-       - "1995" -> "တစ်ထောင့် ကိုးရာ ကိုးဆယ့်ငါး"
-       - "50%" -> "ငါးဆယ် ရာခိုင်နှုန်း"
-    2. **UNITS**: Expand units.
-       - "mm" -> "မီလီမီတာ", "kg" -> "ကီလိုဂရမ်", "$" -> "ဒေါ်လာ"
-    3. **SYNC & TIMING**: 
-       - The translation length MUST match the video length. 
-       - If the video is long ({duration_min} mins), elaborate slightly to fill time.
-    4. **STYLE**: {style} | **TONE**: {tone}
-    5. **OUTPUT**: Spoken Burmese text ONLY. No timestamps.
+    Your Task: Translate dialogue to Burmese (Myanmar).
+    
+    TIMING RULES (VERY IMPORTANT):
+    1. The resulting spoken Burmese MUST fit into {int(duration_sec)} seconds.
+    2. Do not write too little (audio will be too slow).
+    3. Do not write too much (audio will be too fast).
+    4. Aim for approximately {target_word_count} words.
+    
+    CONTEXT:
+    - Style: {style}
+    - Tone: {tone}
+    
+    FORMAT:
+    - Write Numbers as words (100 -> တစ်ရာ).
+    - Expand Units (kg -> ကီလိုဂရမ်).
+    - Output ONLY the Burmese text to be spoken.
     """
     
     response = generate_content_with_retry(model, [video_file, prompt])
@@ -172,7 +181,7 @@ def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
     st.info("🔹 Step 3: Generating Audio...")
     voice = "my-MM-ThihaNeural" if gender == "Male" else "my-MM-NilarNeural"
     
-    # Tone Settings
+    # Tone Logic
     pitch_val, rate_val = "+0Hz", "+0%"
     if tone == "Deep": pitch_val = "-10Hz"
     elif tone == "Fast": rate_val = "+10%" 
@@ -182,24 +191,26 @@ def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
     safe_tts_generate(text, voice, rate_val, pitch_val, "temp_audio.mp3")
     if not os.path.exists("temp_audio.mp3"): raise Exception("Audio generation failed.")
 
-    # --- 5. SMART SYNC (The Fix for 8min Videos) ---
-    st.info("🔹 Step 4: Syncing Audio to Video Timeline...")
+    # --- 5. FORCE SYNC (timeline ကို အသေကိုက်အောင် လုပ်ခြင်း) ---
+    st.info("🔹 Step 4: Force Syncing Audio to Video...")
     final_video = "final_dubbed.mp4"
     
     aud_len = get_duration("temp_audio.mp3")
     
-    # Calculate Speed Factor to match Video Length
+    # Calculate Exact Ratio
     if duration_sec > 0 and aud_len > 0:
         ratio = aud_len / duration_sec
-        # Limit speed change to avoid robotic sound (0.7x to 1.3x)
-        speed = max(0.7, min(ratio, 1.3))
+        
+        # NOTE: We allow a wider range (0.6 to 1.5) to ensure it FITS even if AI wrote too much/little
+        # This guarantees the audio ends EXACTLY when video ends.
+        speed = max(0.6, min(ratio, 1.5))
         
         # Apply Time Stretch
         subprocess.run(['ffmpeg', '-y', '-i', "temp_audio.mp3", '-filter:a', f"atempo={speed}", "temp_sync.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         shutil.copy("temp_audio.mp3", "temp_sync.mp3")
 
-    # Merge
+    # Final Merge
     cmd = [
         'ffmpeg', '-y', 
         '-i', video_path, 
@@ -212,6 +223,7 @@ def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
     
     if not os.path.exists(final_video): raise Exception("FFmpeg failed.")
     return final_video
+
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
