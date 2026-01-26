@@ -66,11 +66,19 @@ def generate_content_with_retry(model, content, retries=3):
 # ---------------------------------------------------------
 # 🎬 PROCESSING WORKFLOW
 # ---------------------------------------------------------
+# ---------------------------------------------------------
+# 🎬 PROCESSING WORKFLOW (Improved Sync for Long Videos)
+# ---------------------------------------------------------
 def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
     check_ffmpeg()
     
-    # --- 1. UPLOAD ---
-    st.info(f"🔹 Step 1: Uploading Video...")
+    # 1. Get Duration EARLY to tell AI
+    duration_sec = get_duration(video_path)
+    duration_min = round(duration_sec / 60, 2)
+    print(f"DEBUG: Video Duration: {duration_min} minutes")
+
+    # --- 2. UPLOAD ---
+    st.info(f"🔹 Step 1: Uploading Video ({duration_min} mins)...")
     genai.configure(api_key=api_key)
     video_file = genai.upload_file(video_path)
     
@@ -81,87 +89,80 @@ def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
         if time.time() - start > 600: raise Exception("Timeout error.")
     if video_file.state.name == "FAILED": raise Exception("Upload failed.")
 
-    # --- 2. GENERATE SCRIPT (UPGRADED PROMPT) ---
-    st.info(f"🔹 Step 2: Translating with Smart Context ({model_id})...")
+    # --- 3. GENERATE SCRIPT (TIME-AWARE PROMPT) ---
+    st.info(f"🔹 Step 2: Translating & Syncing...")
     
     model = genai.GenerativeModel(model_id)
     
-    # 🔥 ဒီနေရာက မိတ်ဆွေလိုချင်တဲ့ အဓိက ပြောင်းလဲမှုပါ 🔥
+    # 🔥 PROMPT UPDATE: Time-Aware Injection 🔥
     prompt = f"""
-    Act as a professional Burmese Translator & Voiceover Scriptwriter.
-    Your Task: Translate the spoken dialogue into natural, spoken Burmese (Myanmar).
-
-    CONTEXT SETTINGS:
-    - Style: {style}
-    - Tone: {tone}
-
-    CRITICAL RULES FOR TRANSLATION (MUST FOLLOW):
-    1. **NUMBERS & UNITS**: Convert ALL numbers and symbols into full spoken Burmese words.
-       - "10000" -> "တစ်သောင်း" (NOT "တစ် သုည သုည").
-       - "1990" -> "တစ်ထောင့် ကိုးရာ ကိုးဆယ်".
-       - "50%" -> "ငါးဆယ် ရာခိုင်နှုန်း".
-       - "mm" -> "မီလီမီတာ", "kg" -> "ကီလိုဂရမ်", "$" -> "ဒေါ်လာ".
+    Act as a professional Movie Dubbing Artist.
+    The video is exactly {duration_min} minutes long.
     
-    2. **STYLE ADAPTATION**:
-       - If Style is 'Vlogger': Use casual words like "ဘော်ဒါတို့", "ကျွန်တော်/ကျွန်မ" (Not "ကျုပ်"). Use active, high-energy sentence structures.
-       - If Style is 'Documentary/Narrator': Use formal, polished Burmese (စာဆန်ဆန်).
-       - If Style is 'Movie Recap': Use dramatic, storytelling flow.
-
-    3. **TIMELINE SYNC**:
-       - Keep sentences CONCISE. Do not explain things unnecessarily.
-       - The translation length MUST match the original speech length to avoid audio speed issues.
+    Your Task: Translate the dialogue into Burmese (Myanmar) to MATCH this duration.
     
-    4. **CLEAN OUTPUT**:
-       - Return ONLY the Burmese text to be spoken.
-       - NO timestamps (00:01), NO notes, NO English words.
+    CRITICAL SYNC RULES:
+    1. **Expand or Condense**: If the video is long, use detailed descriptions and slightly longer sentences to fill the time. If short, be concise.
+    2. **Pacing**: The generated text must flow naturally for {duration_min} minutes.
+    3. **Style**: {style} | **Tone**: {tone}
+    4. **Output**: ONLY the spoken Burmese words. NO timestamps.
     """
     
     response = generate_content_with_retry(model, [video_file, prompt])
     text = response.text.strip()
     if not text: raise Exception("AI returned empty text.")
 
-    # --- 3. TTS ---
-    st.info("🔹 Step 3: Generating Human-like Audio...")
+    # --- 4. TTS ---
+    st.info("🔹 Step 3: Generating Audio...")
     voice = "my-MM-ThihaNeural" if gender == "Male" else "my-MM-NilarNeural"
     
-    # Fine-tuning Pitch/Rate for Tones
     pitch_val, rate_val = "+0Hz", "+0%"
     if tone == "Deep": pitch_val = "-12Hz"
-    elif tone == "Fast": rate_val = "+15%"
-    elif tone == "Motivation": pitch_val = "+5Hz"; rate_val = "+10%"
+    elif tone == "Fast": rate_val = "+10%" 
+    elif tone == "Motivation": pitch_val = "+5Hz"; rate_val = "+5%"
     elif tone == "Calm": pitch_val = "-5Hz"; rate_val = "-5%"
     
     safe_tts_generate(text, voice, rate_val, pitch_val, "temp_audio.mp3")
     if not os.path.exists("temp_audio.mp3"): raise Exception("Audio failed.")
 
-    # --- 4. MERGE ---
-    st.info("🔹 Step 4: Finalizing Video...")
+    # --- 5. SMART SYNC & MERGE ---
+    st.info("🔹 Step 4: Finalizing & Syncing...")
     final_video = "final_dubbed.mp4"
     
-    # Calculate duration to handle sync
-    def get_len(f):
-        r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', f], capture_output=True, text=True)
-        return float(json.loads(r.stdout)['format']['duration'])
+    aud_len = get_duration("temp_audio.mp3")
+    
+    # 🔥 SMART SYNC LOGIC 🔥
+    if duration_sec > 0 and aud_len > 0:
+        # Calculate ratio
+        ratio = aud_len / duration_sec
+        
+        # If Audio is too short (e.g., 5 mins audio for 8 mins video), slow it down slightly
+        # If Audio is too long, speed it up
+        # We clamp the speed between 0.75x (slower) and 1.35x (faster) to keep it natural
+        speed = max(0.75, min(ratio, 1.35))
+        
+        print(f"DEBUG: Syncing Speed Factor: {speed}")
+        subprocess.run(['ffmpeg', '-y', '-i', "temp_audio.mp3", '-filter:a', f"atempo={speed}", "temp_sync.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        shutil.copy("temp_audio.mp3", "temp_sync.mp3")
 
-    try:
-        vid_len = get_len(video_path)
-        aud_len = get_len("temp_audio.mp3")
-        # Smart Speed Adjustment (0.8x to 1.3x limit to keep it natural)
-        speed = max(0.8, min(aud_len / vid_len, 1.3))
-    except:
-        speed = 1.0
-
-    subprocess.run(['ffmpeg', '-y', '-i', "temp_audio.mp3", '-filter:a', f"atempo={speed}", "temp_sync.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
+    # Merge Command (Removed -shortest to prevent cutting video if audio is slightly short)
     cmd = [
-        'ffmpeg', '-y', '-i', video_path, '-i', "temp_sync.mp3",
-        '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', 
-        '-shortest', final_video
+        'ffmpeg', '-y', 
+        '-i', video_path, 
+        '-i', "temp_sync.mp3",
+        '-c:v', 'copy',       # Keep original video quality (Fast)
+        '-c:a', 'aac', 
+        '-map', '0:v:0', 
+        '-map', '1:a:0', 
+        # '-shortest',        # Removed this so 8 min video stays 8 mins
+        final_video
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     if not os.path.exists(final_video): raise Exception("FFmpeg failed.")
     return final_video
+
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
