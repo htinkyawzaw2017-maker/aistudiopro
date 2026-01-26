@@ -12,34 +12,75 @@ from pydub import AudioSegment
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 3D UI CONFIGURATION (UNCHANGED)
+# 🎨 3D PRO UI CONFIGURATION
 # ---------------------------------------------------------
-st.set_page_config(page_title="AI Video Studio Pro", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Global AI Studio", page_icon="🌐", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #0d1117; color: #e6edf3; }
-    .css-1r6slb0, .stFileUploader {
-        background: #161b22; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        border: 1px solid #30363d; padding: 20px;
+    /* Global Deep Dark Theme */
+    .stApp { background-color: #050505; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+    
+    /* 3D Glassmorphism Containers */
+    .css-1r6slb0, .stFileUploader, div[data-testid="stSidebar"] {
+        background: rgba(25, 30, 40, 0.9);
+        backdrop-filter: blur(15px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        box-shadow: 0 15px 35px rgba(0,0,0,0.6);
+        padding: 20px;
     }
+
+    /* 3D Neon Buttons */
     .stButton>button {
-        background: linear-gradient(145deg, #238636, #2ea043);
-        box-shadow: 5px 5px 10px #0f3d0f, -5px -5px 10px #2f9e4f;
-        color: white; border: none; border-radius: 12px; height: 55px;
-        font-weight: bold; font-size: 16px; width: 100%;
+        background: linear-gradient(135deg, #00c6ff, #0072ff);
+        color: white; border: none; border-radius: 12px; height: 50px;
+        font-weight: 700; letter-spacing: 1px;
+        box-shadow: 0 5px 15px rgba(0, 114, 255, 0.4), inset 0 2px 5px rgba(255,255,255,0.2);
+        transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        width: 100%; text-transform: uppercase;
     }
-    .stButton>button:hover { transform: translateY(-3px); box-shadow: 0 0 15px rgba(46, 160, 67, 0.8); }
-    .success-box { padding: 15px; background: #143d1e; border-left: 5px solid #00ff00; border-radius: 10px; margin-top: 10px; }
+    .stButton>button:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 25px rgba(0, 114, 255, 0.6);
+    }
+    .stButton>button:active { transform: translateY(2px); }
+
+    /* Custom Navigation Bar */
+    .nav-bar {
+        display: flex; justify-content: space-around; background: #111; 
+        padding: 15px; border-radius: 15px; margin-bottom: 20px; border: 1px solid #333;
+    }
+    .nav-item { color: #888; font-weight: bold; font-size: 14px; }
+    .nav-item.active { color: #00c6ff; text-shadow: 0 0 10px #00c6ff; }
+
+    /* Success/Error Boxes */
+    .success-box { padding: 15px; background: #0f3d0f; border-left: 5px solid #00ff00; border-radius: 10px; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 🌍 MULTI-LANGUAGE VOICE DATABASE
+# ---------------------------------------------------------
+VOICE_MAP = {
+    "Myanmar (Burmese)": {"code": "my", "voice_m": "my-MM-ThihaNeural", "voice_f": "my-MM-NilarNeural"},
+    "English (US)": {"code": "en", "voice_m": "en-US-ChristopherNeural", "voice_f": "en-US-JennyNeural"},
+    "Thai": {"code": "th", "voice_m": "th-TH-NiwatNeural", "voice_f": "th-TH-PremwadeeNeural"},
+    "Chinese (Mandarin)": {"code": "zh", "voice_m": "zh-CN-YunxiNeural", "voice_f": "zh-CN-XiaoxiaoNeural"},
+    "Japanese": {"code": "ja", "voice_m": "ja-JP-KeitaNeural", "voice_f": "ja-JP-NanamiNeural"},
+    "Korean": {"code": "ko", "voice_m": "ko-KR-InJoonNeural", "voice_f": "ko-KR-SunHiNeural"},
+    "Spanish": {"code": "es", "voice_m": "es-ES-AlvaroNeural", "voice_f": "es-ES-ElviraNeural"},
+    "French": {"code": "fr", "voice_m": "fr-FR-HenriNeural", "voice_f": "fr-FR-DeniseNeural"},
+    "German": {"code": "de", "voice_m": "de-DE-ConradNeural", "voice_f": "de-DE-KatjaNeural"},
+    "Hindi": {"code": "hi", "voice_m": "hi-IN-MadhurNeural", "voice_f": "hi-IN-SwaraNeural"}
+}
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
 def check_ffmpeg():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ CRITICAL: FFmpeg missing. Please install it.")
+        st.error("❌ CRITICAL: FFmpeg missing. Install it via `apt-get install ffmpeg` or `brew install ffmpeg`.")
         st.stop()
 
 def get_duration(file_path):
@@ -49,203 +90,232 @@ def get_duration(file_path):
         return float(json.loads(r.stdout)['format']['duration'])
     except: return 0
 
-# Safe TTS Generation
 async def _tts_async(text, voice, rate, pitch, output):
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     await communicate.save(output)
 
 def generate_tts_segment(text, voice, rate, pitch, filename):
     try:
-        asyncio.run(_tts_async(text, voice, rate, pitch, filename))
-        return True
-    except:
-        # Fallback loop
+        # Create a new loop for thread safety
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_tts_async(text, voice, rate, pitch, filename))
+        loop.close()
         return True
+    except Exception as e:
+        print(f"TTS Error: {e}")
+        return False
 
-# AI Translation with Retry
-def translate_segment(model, text, style, tone):
-    prompt = f"""
-    Translate this specific subtitle segment into spoken Burmese.
-    Original: "{text}"
+def translate_segment(model, text, target_lang, style, tone):
+    # Strict prompt to force Number conversion and Language accuracy
+    lang_name = target_lang
     
-    RULES:
-    1. **NUMBERS**: "10000" -> "တစ်သောင်း", "1990" -> "တစ်ထောင့်ကိုးရာ ကိုးဆယ်".
-    2. **UNITS**: "mm" -> "မီလီမီတာ", "kg" -> "ကီလိုဂရမ်".
-    3. **STYLE**: {style} (Use "ကျွန်တော်/ကျွန်မ" for Vlogger, Formal for Narrator).
+    prompt = f"""
+    Act as a professional Dubbing Translator.
+    Translate the following subtitle text into {lang_name}.
+    Original Text: "{text}"
+    
+    CRITICAL RULES:
+    1. **LANGUAGE**: Output MUST be in {lang_name}. Do NOT output English unless the target is English.
+    2. **NUMBERS**: Convert ALL numbers to spoken words in {lang_name}.
+       - Example (if Burmese): "10000" -> "တစ်သောင်း", "50mm" -> "ငါးဆယ် မီလီမီတာ".
+       - Example (if English): "10000" -> "Ten thousand".
+    3. **STYLE**: {style}. (If Burmese Vlogger: Use "ကျွန်တော်/ကျွန်မ" and casual particles like "ဗျ/ရှင်").
     4. **TONE**: {tone}.
-    5. **LENGTH**: Keep it short to match original timing.
-    6. **OUTPUT**: Burmese text ONLY.
+    5. **LENGTH**: Keep translation concise to match original duration.
+    
+    OUTPUT: Just the translated spoken text. No notes.
     """
-    for _ in range(3):
-        try:
-            res = model.generate_content(prompt)
-            return res.text.strip()
-        except exceptions.ResourceExhausted:
-            time.sleep(5)
-            continue
-        except:
-            return text # Fallback to original if fail
-    return text
+    try:
+        res = model.generate_content(prompt)
+        t = res.text.strip()
+        return t if t else text
+    except:
+        return text
 
 # ---------------------------------------------------------
-# 🎬 ADVANCED SYNC ENGINE (SEGMENT BASED)
+# 🎬 SYNC ENGINE (WHISPER + TIME STRETCH)
 # ---------------------------------------------------------
-def process_precise_sync(video_path, gender, style, tone, api_key, model_id, status_box, progress_bar):
+def process_sync_dubbing(video_path, target_lang_key, gender, style, tone, api_key, model_id, status, progress):
     check_ffmpeg()
     
-    # 1. EXTRACT AUDIO
-    status_box.update(label="🎧 Step 1: Analyzing Audio Structure...", state="running")
-    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp_audio.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 1. SETUP LANGUAGE & VOICE
+    lang_data = VOICE_MAP[target_lang_key]
+    voice = lang_data["voice_m"] if gender == "Male" else lang_data["voice_f"]
     
-    # 2. WHISPER TRANSCRIPTION (TIMESTAMPS)
-    status_box.update(label="🧠 Step 2: Detecting Speech Segments (Whisper AI)...", state="running")
-    model = whisper.load_model("base") # 'base' is good balance of speed/accuracy
-    result = model.transcribe("temp_audio.wav")
-    segments = result['segments']
-    
-    total_segments = len(segments)
-    st.info(f"✨ Detected {total_segments} speech segments to dub.")
-    
-    # 3. PROCESS SEGMENTS
-    status_box.update(label="🎙️ Step 3: Dubbing Each Segment...", state="running")
-    genai.configure(api_key=api_key)
-    gemini_model = genai.GenerativeModel(model_id)
-    
-    # Create silent canvas
-    video_dur = get_duration(video_path)
-    final_audio = AudioSegment.silent(duration=video_dur * 1000) # milliseconds
-    
-    voice = "my-MM-ThihaNeural" if gender == "Male" else "my-MM-NilarNeural"
-    
-    # Tone settings
+    # Tone Adjustment
     rate_str, pitch_str = "+0%", "+0Hz"
     if tone == "Fast": rate_str = "+15%"
     elif tone == "Deep": pitch_str = "-10Hz"
+    elif tone == "Calm": pitch_str = "-5Hz"; rate_str = "-5%"
+    
+    # 2. EXTRACT AUDIO
+    status.update(label="🎧 Step 1: Extracting Audio Track...", state="running")
+    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp_audio.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    
+    # 3. WHISPER DETECTION
+    status.update(label=f"🧠 Step 2: Detecting Speech (Whisper AI)...", state="running")
+    whisper_model = whisper.load_model("base")
+    result = whisper_model.transcribe("temp_audio.wav")
+    segments = result['segments']
+    
+    total_segs = len(segments)
+    st.info(f"✨ Detected {total_segs} speech segments.")
+    
+    # 4. SEGMENT PROCESSING
+    status.update(label=f"🎙️ Step 3: Translating & Dubbing to {target_lang_key}...", state="running")
+    
+    genai.configure(api_key=api_key)
+    gemini = genai.GenerativeModel(model_id)
+    
+    # Master Silent Track
+    video_dur = get_duration(video_path)
+    final_audio = AudioSegment.silent(duration=video_dur * 1000)
     
     for i, seg in enumerate(segments):
-        start_time = seg['start']
-        end_time = seg['end']
-        original_text = seg['text']
-        duration_needed = end_time - start_time
+        start = seg['start']
+        end = seg['end']
+        orig_text = seg['text']
+        seg_dur = end - start
         
         # Translate
-        translated_text = translate_segment(gemini_model, original_text, style, tone)
+        trans_text = translate_segment(gemini, orig_text, target_lang_key, style, tone)
         
-        # TTS Generation
-        seg_filename = f"seg_{i}.mp3"
-        generate_tts_segment(translated_text, voice, rate_str, pitch_str, seg_filename)
+        # TTS
+        fname = f"seg_{i}.mp3"
+        generate_tts_segment(trans_text, voice, rate_str, pitch_str, fname)
         
-        # Time Stretching (Fit to slot)
-        seg_audio = AudioSegment.from_file(seg_filename)
-        current_dur = len(seg_audio) / 1000.0
-        
-        # Calculate speed change needed
-        if duration_needed > 0 and current_dur > 0:
-            speed_factor = current_dur / duration_needed
-            # Clamp speed (0.7x to 1.5x) to prevent distortion
-            speed_factor = max(0.7, min(speed_factor, 1.5))
+        # Time Stretch (Sync)
+        if os.path.exists(fname):
+            seg_audio = AudioSegment.from_file(fname)
+            curr_dur = len(seg_audio) / 1000.0
             
-            # Apply FFmpeg for high quality stretching
-            stretched_filename = f"seg_{i}_final.mp3"
-            subprocess.run(['ffmpeg', '-y', '-i', seg_filename, '-filter:a', f"atempo={speed_factor}", stretched_filename], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            if os.path.exists(stretched_filename):
-                seg_final = AudioSegment.from_file(stretched_filename)
-                # Overlay onto main track at exact start time
-                final_audio = final_audio.overlay(seg_final, position=start_time * 1000)
+            if curr_dur > 0 and seg_dur > 0:
+                # Clamp speed to avoid robotic sounds (0.6x to 1.5x)
+                speed = max(0.6, min(curr_dur / seg_dur, 1.5))
+                
+                stretched_name = f"seg_{i}_final.mp3"
+                subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", stretched_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                if os.path.exists(stretched_name):
+                    final_seg = AudioSegment.from_file(stretched_name)
+                    final_audio = final_audio.overlay(final_seg, position=start * 1000)
         
-        # Update Progress
-        prog = int((i / total_segments) * 80) + 10
-        progress_bar.progress(prog)
+        # Progress Update
+        p = int((i / total_segs) * 80) + 10
+        progress.progress(p)
         
-        # Cleanup temp
-        try: 
-            os.remove(seg_filename)
+        # Cleanup
+        try:
+            os.remove(fname)
             if os.path.exists(f"seg_{i}_final.mp3"): os.remove(f"seg_{i}_final.mp3")
         except: pass
 
-    # Export Full Audio
     final_audio.export("final_track.mp3", format="mp3")
     
-    # 4. MERGE WITH VIDEO
-    status_box.update(label="🎬 Step 4: Final Merging...", state="running")
-    progress_bar.progress(95)
+    # 5. MERGE
+    status.update(label="🎬 Step 4: Final Rendering...", state="running")
+    progress.progress(95)
     
-    final_video = "final_dubbed.mp4"
+    final_vid = "final_output.mp4"
     cmd = [
         'ffmpeg', '-y', 
         '-i', video_path, 
         '-i', "final_track.mp3",
-        '-c:v', 'copy', # Keep video quality
+        '-c:v', 'copy', 
         '-c:a', 'aac', 
         '-map', '0:v:0', '-map', '1:a:0', 
-        final_video
+        final_vid
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    progress_bar.progress(100)
+    progress.progress(100)
     
-    return final_video
+    return final_vid
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI
+# 🖥️ MAIN UI LAYOUT
 # ---------------------------------------------------------
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=80)
-    st.title("AI Studio Pro")
-    st.caption("v3.0 | Precise Sync Engine")
+    st.title("GLOBAL STUDIO")
+    st.caption("Pro AI Dubbing v4.0")
     
     if 'api_key' not in st.session_state: st.session_state.api_key = ""
-    key_input = st.text_input("API Key", type="password", value=st.session_state.api_key)
-    if key_input: st.session_state.api_key = key_input
+    api_key = st.text_input("🔑 API Key", type="password", value=st.session_state.api_key)
+    if api_key: st.session_state.api_key = api_key
     
     st.markdown("---")
-    model_mode = st.radio("Model Mode", ["Custom", "Preset"])
-    if model_mode == "Custom":
-        model_id = st.text_input("Model Name", value="gemini-2.5-flash")
+    st.header("🤖 Model Engine")
+    mode = st.radio("Mode", ["Preset", "Custom"], horizontal=True)
+    if mode == "Custom":
+        model_id = st.text_input("Model ID", "gemini-2.5-flash")
     else:
         model_id = st.selectbox("Select Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
     
     st.markdown("---")
-    if st.button("🔄 Reboot System"): st.rerun()
+    if st.button("🔄 REBOOT SYSTEM"): st.rerun()
 
-st.title("🎙️ AI Precise Dubbing")
-st.markdown("**Core Feature:** Lip-sync timing matching using `Whisper AI` + `Segment Stretching`.")
+# Feature Navigation Bar
+st.markdown("""
+<div class="nav-bar">
+    <span class="nav-item active">🎙️ DUBBING PRO</span>
+    <span class="nav-item">🚀 VIRAL KIT</span>
+    <span class="nav-item">📝 SCRIPT</span>
+    <span class="nav-item">🖼️ THUMBNAIL</span>
+</div>
+""", unsafe_allow_html=True)
+
+st.title("🎙️ International AI Dubbing")
+st.markdown("Precision Lip-Syncing • Multi-Language • 3D Audio Engine")
 
 if not st.session_state.api_key:
-    st.warning("⚠️ Please enter API Key in Sidebar.")
+    st.warning("⚠️ Please connect API Key in Sidebar to unlock Pro features.")
     st.stop()
 
-uploaded_file = st.file_uploader("📂 Upload Video", type=['mp4', 'mov'])
+# 3D Upload Container
+uploaded_file = st.file_uploader("📂 Upload Source Video (Any Language)", type=['mp4', 'mov', 'avi'])
 
 if uploaded_file:
     with open("temp.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
     
-    st.markdown("### 🎛️ Control Panel")
-    col1, col2 = st.columns(2)
-    with col1:
-        gender = st.selectbox("👤 Gender", ["Male", "Female"])
-        style = st.selectbox("🎭 Style", ["Narrator", "Movie Recap", "Vlogger", "Documentary"])
-    with col2:
-        tone = st.selectbox("🎚️ Tone", ["Natural", "Deep", "Motivation", "Calm"])
+    # 3D Settings Panel
+    st.markdown("### 🎛️ Production Settings")
+    
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        target_lang = st.selectbox("🌐 Target Language", list(VOICE_MAP.keys()))
+    with c2:
+        gender = st.selectbox("👤 Voice Gender", ["Male", "Female"])
+    with c3:
+        tone = st.selectbox("🎚️ Audio Tone", ["Natural", "Deep", "Fast", "Calm"])
+        
+    style = st.selectbox("🎭 Content Style", ["Narrator (Formal)", "Vlogger (Casual)", "Movie Recap (Dramatic)", "Documentary (Serious)"])
     
     st.write("")
-    if st.button("🚀 START PRECISE DUBBING", type="primary"):
-        status_box = st.status("⚙️ Initializing Whisper AI...", expanded=True)
+    if st.button("🚀 START PRODUCTION RENDER", type="primary"):
+        status = st.status("⚙️ Initializing AI Engine...", expanded=True)
         progress = st.progress(0)
         
         try:
-            output = process_precise_sync("temp.mp4", gender, style, tone, st.session_state.api_key, model_id, status_box, progress)
+            output = process_sync_dubbing(
+                "temp.mp4", target_lang, gender, style, tone, 
+                st.session_state.api_key, model_id, status, progress
+            )
             
-            status_box.update(label="✅ Dubbing Complete!", state="complete", expanded=False)
-            st.markdown("<div class='success-box'><h3>✨ Result Ready!</h3></div>", unsafe_allow_html=True)
+            status.update(label="✅ Rendering Complete!", state="complete", expanded=False)
+            
+            st.markdown(f"""
+            <div class="success-box">
+                <h3>✨ {target_lang} Dubbing Ready!</h3>
+                <p>Synced to timeline with <b>{style}</b> style.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
             st.video(output)
             with open(output, "rb") as f:
-                st.download_button("💾 Download Video", f, "precise_dub.mp4")
+                st.download_button(f"💾 Download {target_lang} Video", f, f"dubbed_{target_lang}.mp4")
                 
         except Exception as e:
-            status_box.update(label="❌ Failed", state="error")
-            st.error(f"Error: {str(e)}")
-            st.code(traceback.format_exc())
+            status.update(label="❌ Critical Error", state="error")
+            st.error(f"System Log: {str(e)}")
+            st.code(str(e))
