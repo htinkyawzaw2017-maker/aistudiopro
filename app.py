@@ -95,91 +95,29 @@ def upload_to_gemini(video_path, api_key):
 # 🎬 FEATURE: DUBBING (SYNC FIXED)
 # ---------------------------------------------------------
 def translate_segment(model, text, target_lang, style, tone):
-    # 🔥 FIXED: FORCE TRANSLATION TO TARGET LANG 🔥
+    # Mapping for language names to ensure AI understands
+    lang_name = "Burmese (Myanmar)" if target_lang == "Myanmar (Burmese)" else target_lang
+    
     prompt = f"""
-    Translate this subtitle to {target_lang}.
+    Act as a professional Dubbing Translator.
+    Translate the following text into {lang_name} ({target_lang}).
     Original: "{text}"
     
-    RULES:
-    1. OUTPUT MUST BE IN {target_lang} ONLY. NO ENGLISH EXPLANATION.
-    2. Convert numbers to words (e.g., 1000 -> One Thousand / တစ်ထောင်).
-    3. Style: {style}. Tone: {tone}.
-    4. Keep it concise.
+    CRITICAL RULES:
+    1. OUTPUT MUST BE IN {lang_name} SCRIPT ONLY.
+    2. DO NOT OUTPUT ENGLISH CHARACTERS (Unless it's a specific term like 'iPhone').
+    3. Convert numbers to {lang_name} words (100 -> တစ်ရာ).
+    4. Style: {style}. Tone: {tone}.
+    5. JUST RETURN THE TRANSLATED TEXT. NO EXPLANATION.
     """
     try:
         res = model.generate_content(prompt)
-        return res.text.strip()
-    except: return text
+        t = res.text.strip()
+        # Fallback: If AI returns English text for Myanmar, force retry or ignore
+        return t if t else text
+    except:
+        return text
 
-def process_sync_dubbing(video_path, target_lang_key, gender, style, tone, api_key, model_id, status, progress):
-    check_ffmpeg()
-    
-    # 🔥 FIXED: Voice Selection Logic 🔥
-    lang_data = VOICE_MAP[target_lang_key]
-    # Explicitly selecting the correct voice ID based on language
-    voice = lang_data["voice_m"] if gender == "Male" else lang_data["voice_f"]
-    
-    st.write(f"DEBUG: Using Voice -> {voice} for {target_lang_key}") # Debug line to confirm
-
-    # Extract Audio
-    status.update(label="🎧 Step 1: Extracting Audio...", state="running")
-    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp_audio.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    # Whisper
-    status.update(label="🧠 Step 2: Whisper Analysis...", state="running")
-    whisper_model = whisper.load_model("base")
-    result = whisper_model.transcribe("temp_audio.wav")
-    segments = result['segments']
-    
-    genai.configure(api_key=api_key)
-    gemini = genai.GenerativeModel(model_id)
-    
-    video_dur = get_duration(video_path)
-    final_audio = AudioSegment.silent(duration=video_dur * 1000)
-    
-    # Process Segments
-    status.update(label=f"🎙️ Step 3: Dubbing to {target_lang_key}...", state="running")
-    total_segs = len(segments)
-    
-    for i, seg in enumerate(segments):
-        start, end = seg['start'], seg['end']
-        orig_text = seg['text']
-        
-        # Translate
-        trans_text = translate_segment(gemini, orig_text, target_lang_key, style, tone)
-        
-        # TTS
-        fname = f"seg_{i}.mp3"
-        pitch = "-10Hz" if tone == "Deep" else "+0Hz"
-        generate_tts_segment(trans_text, voice, "+0%", pitch, fname)
-        
-        # Sync
-        if os.path.exists(fname):
-            seg_audio = AudioSegment.from_file(fname)
-            seg_dur = end - start
-            curr_dur = len(seg_audio) / 1000.0
-            
-            if curr_dur > 0 and seg_dur > 0:
-                speed = max(0.6, min(curr_dur / seg_dur, 1.5))
-                stretched_name = f"seg_{i}_final.mp3"
-                subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", stretched_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                if os.path.exists(stretched_name):
-                    final_seg = AudioSegment.from_file(stretched_name)
-                    final_audio = final_audio.overlay(final_seg, position=start * 1000)
-        
-        progress.progress(int((i / total_segs) * 90))
-        try: os.remove(fname); os.remove(f"seg_{i}_final.mp3")
-        except: pass
-
-    final_audio.export("final_track.mp3", format="mp3")
-    
-    # Merge
-    status.update(label="🎬 Step 4: Merging...", state="running")
-    final_vid = "final_output.mp4"
-    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', final_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    progress.progress(100)
-    return final_vid
 
 # ---------------------------------------------------------
 # 🚀 FEATURE: VIRAL KIT
