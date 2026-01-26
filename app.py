@@ -8,48 +8,52 @@ import os
 import time
 import shutil
 import whisper
+import re
 from pydub import AudioSegment
 from PIL import Image
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 UI CONFIGURATION
+# 🎨 PRO UI SETUP
 # ---------------------------------------------------------
-st.set_page_config(page_title="Global AI Studio", page_icon="🌐", layout="wide")
+st.set_page_config(page_title="Global AI Studio", page_icon="🎙️", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #050505; color: #e0e0e0; }
+    .stApp { background-color: #000000; color: #ffffff; }
     .css-1r6slb0, .stFileUploader, div[data-testid="stSidebar"] {
-        background: rgba(25, 30, 40, 0.9); border-radius: 20px; border: 1px solid #333; padding: 20px;
+        background: #111; border: 1px solid #333; border-radius: 15px; padding: 20px;
     }
     .stButton>button {
-        background: linear-gradient(135deg, #00c6ff, #0072ff); color: white; border: none;
-        border-radius: 12px; height: 50px; font-weight: bold; width: 100%;
+        background: linear-gradient(90deg, #ff00cc, #333399); color: white; border: none;
+        height: 50px; font-weight: bold; width: 100%; border-radius: 10px;
+        transition: 0.3s;
     }
-    .result-box { background: #1a1a1a; padding: 20px; border-radius: 10px; border: 1px solid #333; margin-top: 10px; }
-    .error-box { background: #3d0f0f; padding: 15px; border-radius: 10px; border: 1px solid red; }
+    .stButton>button:hover { transform: scale(1.02); }
+    .success-text { color: #00ff00; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 🌍 VOICE DATABASE
+# 🌍 VOICE DATABASE (EXPANDED)
 # ---------------------------------------------------------
-VOICE_MAP = {
-    "Myanmar (Burmese)": {"code": "my", "voice_m": "my-MM-ThihaNeural", "voice_f": "my-MM-NilarNeural"},
-    "English (US)": {"code": "en", "voice_m": "en-US-ChristopherNeural", "voice_f": "en-US-JennyNeural"},
-    "Thai": {"code": "th", "voice_m": "th-TH-NiwatNeural", "voice_f": "th-TH-PremwadeeNeural"},
-    "Chinese": {"code": "zh", "voice_m": "zh-CN-YunxiNeural", "voice_f": "zh-CN-XiaoxiaoNeural"},
-    "Japanese": {"code": "ja", "voice_m": "ja-JP-KeitaNeural", "voice_f": "ja-JP-NanamiNeural"},
-    "Korean": {"code": "ko", "voice_m": "ko-KR-InJoonNeural", "voice_f": "ko-KR-SunHiNeural"},
+# edge-tts only has 2 Burmese voices, so we create "Styles" by manipulating Pitch/Rate
+VOICE_OPTIONS = {
+    "Myanmar (Thiha - Male News)": {"voice": "my-MM-ThihaNeural", "pitch": "+0Hz", "rate": "+0%"},
+    "Myanmar (Nilar - Female Story)": {"voice": "my-MM-NilarNeural", "pitch": "+0Hz", "rate": "+0%"},
+    "Myanmar (Thiha - Deep Narrator)": {"voice": "my-MM-ThihaNeural", "pitch": "-15Hz", "rate": "-10%"},
+    "Myanmar (Nilar - Sweet Vlog)": {"voice": "my-MM-NilarNeural", "pitch": "+10Hz", "rate": "+10%"},
+    
+    "English (US - Guy)": {"voice": "en-US-ChristopherNeural", "pitch": "+0Hz", "rate": "+0%"},
+    "English (US - Jenny)": {"voice": "en-US-JennyNeural", "pitch": "+0Hz", "rate": "+0%"},
 }
 
 # ---------------------------------------------------------
-# 🛠️ HELPER FUNCTIONS
+# 🛠️ SYSTEM FUNCTIONS
 # ---------------------------------------------------------
 def check_ffmpeg():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg missing. Install via `apt-get install ffmpeg`.")
+        st.error("❌ FFmpeg Missing! System cannot process audio.")
         st.stop()
 
 def get_duration(file_path):
@@ -63,11 +67,11 @@ async def _tts_async(text, voice, rate, pitch, output):
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     await communicate.save(output)
 
-def generate_tts_segment(text, voice, rate, pitch, filename):
+def generate_tts(text, voice_config, filename):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(_tts_async(text, voice, rate, pitch, filename))
+        loop.run_until_complete(_tts_async(text, voice_config['voice'], voice_config['rate'], voice_config['pitch'], filename))
         loop.close()
         return True
     except: return False
@@ -83,152 +87,155 @@ def upload_to_gemini(video_path, api_key):
 def extract_frame(video_path, output_image):
     try:
         duration = get_duration(video_path)
-        mid_point = duration / 2
-        subprocess.run(['ffmpeg', '-y', '-ss', str(mid_point), '-i', video_path, '-vframes', '1', output_image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['ffmpeg', '-y', '-ss', str(duration/2), '-i', video_path, '-vframes', '1', output_image], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except: return False
 
 # ---------------------------------------------------------
-# 🎬 CORE FEATURE: SYNC DUBBING
+# 🤬 STRICT TRANSLATION LOGIC (NO ENGLISH ALLOWED)
 # ---------------------------------------------------------
-def translate_segment(model, text, target_lang, style, tone):
+def translate_strict(model, text, target_lang, style):
+    # Forced Prompt Engineering
     prompt = f"""
-    Translate this subtitle to {target_lang}.
-    Original: "{text}"
+    ROLE: Professional Dubbing Translator.
+    TASK: Translate the following text into {target_lang}.
+    INPUT TEXT: "{text}"
     
-    RULES:
-    1. OUTPUT MUST BE IN {target_lang} ONLY.
-    2. Convert numbers to words.
-    3. Style: {style}. Tone: {tone}.
-    4. Keep it concise.
+    🚨 STRICT RULES (MUST FOLLOW):
+    1. OUTPUT ONLY IN {target_lang} SCRIPT.
+    2. ABSOLUTELY NO ENGLISH CHARACTERS ALLOWED in the output.
+    3. If the input is "Hello", output "မင်္ဂလာပါ" (Not "Hello").
+    4. Translate technical terms phonetically if needed (e.g., "AI" -> "အေအိုင်").
+    5. Tone/Style: {style} (Natural spoken flow).
+    6. DO NOT add explanations. JUST the translation.
     """
+    
     try:
-        res = model.generate_content(prompt)
-        return res.text.strip()
-    except: return text
+        response = model.generate_content(prompt)
+        translated = response.text.strip()
+        
+        # Double Check: If output contains English letters, force retry (Python-side check)
+        if target_lang == "Myanmar" and re.search(r'[a-zA-Z]', translated):
+            # Fallback prompt for stubborn AI
+            retry_prompt = f"You outputted English. REWRITE THIS IN BURMESE SCRIPT ONLY: '{translated}'"
+            response = model.generate_content(retry_prompt)
+            translated = response.text.strip()
+            
+        return translated
+    except:
+        return text # Worst case fallback
 
-# 🔥 THIS IS THE FUNCTION THAT WAS MISSING 🔥
-def process_sync_dubbing(video_path, target_lang_key, gender, style, tone, api_key, model_id, status, progress):
+def process_dubbing_workflow(video_path, voice_key, style, api_key, model_id, status_box, progress_bar):
     check_ffmpeg()
     
-    # Setup
-    lang_data = VOICE_MAP[target_lang_key]
-    voice = lang_data["voice_m"] if gender == "Male" else lang_data["voice_f"]
+    # 1. Setup Voice
+    voice_config = VOICE_OPTIONS[voice_key]
+    target_lang = "Myanmar" if "Myanmar" in voice_key else "English"
     
-    # 1. Extract Audio
-    status.update(label="🎧 Step 1: Extracting Audio...", state="running")
-    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp_audio.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 2. Extract Audio
+    status_box.update(label="🎧 Extracting Audio...", state="running")
+    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # 2. Whisper Analysis
-    status.update(label="🧠 Step 2: Whisper Analysis...", state="running")
-    whisper_model = whisper.load_model("base")
-    result = whisper_model.transcribe("temp_audio.wav")
+    # 3. Whisper Transcription
+    status_box.update(label="🧠 Speech Recognition (Whisper)...", state="running")
+    model = whisper.load_model("base")
+    result = model.transcribe("temp.wav")
     segments = result['segments']
     
+    # 4. AI Translation & Dubbing
+    status_box.update(label=f"🎙️ Dubbing to {target_lang} ({style})...", state="running")
     genai.configure(api_key=api_key)
     gemini = genai.GenerativeModel(model_id)
     
     video_dur = get_duration(video_path)
     final_audio = AudioSegment.silent(duration=video_dur * 1000)
     
-    # 3. Process Segments
-    status.update(label=f"🎙️ Step 3: Dubbing to {target_lang_key}...", state="running")
-    total_segs = len(segments)
+    total = len(segments)
     
     for i, seg in enumerate(segments):
         start, end = seg['start'], seg['end']
-        orig_text = seg['text']
+        text = seg['text']
         
-        # Translate
-        trans_text = translate_segment(gemini, orig_text, target_lang_key, style, tone)
+        # 🔥 STRICT TRANSLATION
+        translated_text = translate_strict(gemini, text, target_lang, style)
         
-        # TTS
+        # TTS Generation
         fname = f"seg_{i}.mp3"
-        pitch = "-10Hz" if tone == "Deep" else "+0Hz"
-        generate_tts_segment(trans_text, voice, "+0%", pitch, fname)
+        generate_tts(translated_text, voice_config, fname)
         
-        # Sync
+        # Sync & Stretch
         if os.path.exists(fname):
             seg_audio = AudioSegment.from_file(fname)
             seg_dur = end - start
             curr_dur = len(seg_audio) / 1000.0
             
-            if curr_dur > 0 and seg_dur > 0:
+            if curr_dur > 0:
                 speed = max(0.6, min(curr_dur / seg_dur, 1.5))
-                stretched_name = f"seg_{i}_final.mp3"
-                subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", stretched_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", f"s_{i}.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                if os.path.exists(stretched_name):
-                    final_seg = AudioSegment.from_file(stretched_name)
+                if os.path.exists(f"s_{i}.mp3"):
+                    final_seg = AudioSegment.from_file(f"s_{i}.mp3")
                     final_audio = final_audio.overlay(final_seg, position=start * 1000)
         
-        progress.progress(int((i / total_segs) * 90))
-        try: os.remove(fname); os.remove(f"seg_{i}_final.mp3")
+        progress_bar.progress((i + 1) / total)
+        # Cleanup
+        try: 
+            os.remove(fname)
+            os.remove(f"s_{i}.mp3")
         except: pass
 
     final_audio.export("final_track.mp3", format="mp3")
     
-    # 4. Merge
-    status.update(label="🎬 Step 4: Merging...", state="running")
-    final_vid = "final_output.mp4"
-    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', final_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    progress.progress(100)
-    return final_vid
-
-# ---------------------------------------------------------
-# 🚀 OTHER FEATURES
-# ---------------------------------------------------------
-def process_viral_kit(video_path, api_key, model_id):
-    genai.configure(api_key=api_key)
-    video_file = upload_to_gemini(video_path, api_key)
-    model = genai.GenerativeModel(model_id)
+    # 5. Merge
+    status_box.update(label="🎬 Finalizing Video...", state="running")
+    output_file = "dubbed_output.mp4"
+    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    prompt = """
-    Act as a Viral Social Media Manager. Analyze this video.
-    Generate:
-    1. 3 Clickbait Titles.
-    2. 15 Trending Hashtags.
-    3. Short Caption.
-    """
-    res = model.generate_content([video_file, prompt])
-    return res.text
+    return output_file
 
-def process_script(video_path, api_key, model_id, format_type):
+# ---------------------------------------------------------
+# 🚀 FEATURES: VIRAL, SCRIPT, THUMBNAIL
+# ---------------------------------------------------------
+def feature_viral(video_path, api_key, model_id):
     genai.configure(api_key=api_key)
-    video_file = upload_to_gemini(video_path, api_key)
+    video = upload_to_gemini(video_path, api_key)
     model = genai.GenerativeModel(model_id)
-    res = model.generate_content([video_file, f"Write a {format_type}."])
+    res = model.generate_content([video, "Generate 3 Viral Clickbait Titles (Burmese) and 10 Hashtags for this video."])
     return res.text
 
-def process_thumbnail(video_path, api_key, model_id):
+def feature_script(video_path, api_key, model_id):
+    genai.configure(api_key=api_key)
+    video = upload_to_gemini(video_path, api_key)
+    model = genai.GenerativeModel(model_id)
+    res = model.generate_content([video, "Write a full detailed Blog Post script in Burmese based on this video."])
+    return res.text
+
+def feature_thumbnail(video_path, api_key, model_id):
     extract_frame(video_path, "thumb.jpg")
     img = Image.open("thumb.jpg")
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_id)
-    res = model.generate_content([img, "Describe this image for a YouTube thumbnail prompt."])
+    res = model.generate_content([img, "Describe this image for a high-CTR YouTube Thumbnail prompt."])
     return res.text, "thumb.jpg"
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI LOGIC
+# 🖥️ MAIN DASHBOARD
 # ---------------------------------------------------------
 with st.sidebar:
-    st.title("GLOBAL STUDIO")
+    st.title("🎙️ AI STUDIO PRO")
     if 'api_key' not in st.session_state: st.session_state.api_key = ""
-    api_key = st.text_input("🔑 API Key", type="password", value=st.session_state.api_key)
+    api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
     
-    st.markdown("---")
-    model_mode = st.radio("Mode", ["Preset", "Custom"])
-    model_id = "gemini-2.0-flash-exp" if model_mode == "Preset" else st.text_input("Model ID", "gemini-2.5-flash")
-    
-    st.markdown("---")
-    if st.button("🔄 REBOOT SYSTEM"): st.rerun()
+    st.divider()
+    model_choice = st.selectbox("AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
+    if st.button("🔴 REBOOT APP"): st.rerun()
 
-# Navigation
-menu = st.radio("Select Feature", ["🎙️ Dubbing Pro", "🚀 Viral Kit", "📝 Script Writer", "🖼️ Thumbnail"], horizontal=True)
+# Tabs for Features
+tab1, tab2, tab3, tab4 = st.tabs(["🎙️ DUBBING", "🚀 VIRAL KIT", "📝 SCRIPT", "🖼️ THUMBNAIL"])
 
 if not st.session_state.api_key:
-    st.warning("⚠️ Connect API Key first.")
+    st.warning("⚠️ Please Enter API Key in Sidebar")
     st.stop()
 
 uploaded_file = st.file_uploader("📂 Upload Video", type=['mp4', 'mov'])
@@ -236,50 +243,47 @@ uploaded_file = st.file_uploader("📂 Upload Video", type=['mp4', 'mov'])
 if uploaded_file:
     with open("temp.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
 
-    # --- 1. DUBBING PRO ---
-    if menu == "🎙️ Dubbing Pro":
-        st.subheader("🎙️ International AI Dubbing")
-        c1, c2, c3 = st.columns(3)
-        with c1: target_lang = st.selectbox("Target Language", list(VOICE_MAP.keys()))
-        with c2: gender = st.selectbox("Gender", ["Male", "Female"])
-        with c3: tone = st.selectbox("Tone", ["Natural", "Deep", "Fast"])
-        style = st.selectbox("Style", ["Narrator", "Vlogger", "Movie Recap"])
+    # --- TAB 1: DUBBING ---
+    with tab1:
+        st.subheader("🔊 Auto Dubbing Studio")
         
-        if st.button("🚀 Start Dubbing"):
-            status = st.status("Processing...", expanded=True)
+        c1, c2 = st.columns(2)
+        with c1:
+            # 🔥 NEW: Detailed Narrator Selection
+            voice_choice = st.selectbox("🗣️ Choose Narrator", list(VOICE_OPTIONS.keys()))
+        with c2:
+            style_choice = st.selectbox("🎭 Content Style", ["Natural Conversation", "News Reporter", "Movie Recap (Dramatic)", "Vlogger (Casual)"])
+            
+        if st.button("🚀 START DUBBING", type="primary"):
+            status = st.status("Initializing...", expanded=True)
             progress = st.progress(0)
             try:
-                # 🔥 Calling the function that was missing before
-                out = process_sync_dubbing("temp.mp4", target_lang, gender, style, tone, st.session_state.api_key, model_id, status, progress)
-                status.update(label="✅ Done!", state="complete")
+                out = process_dubbing_workflow("temp.mp4", voice_choice, style_choice, st.session_state.api_key, model_choice, status, progress)
+                status.update(label="✅ Dubbing Complete!", state="complete")
                 st.video(out)
-                with open(out, "rb") as f: st.download_button("Download Video", f, "dubbed.mp4")
-            except Exception as e: 
+                with open(out, "rb") as f: st.download_button("💾 Download Video", f, "dubbed.mp4")
+            except Exception as e:
                 status.update(label="❌ Error", state="error")
                 st.error(str(e))
 
-    # --- 2. VIRAL KIT ---
-    elif menu == "🚀 Viral Kit":
-        st.subheader("🚀 Viral Content")
-        if st.button("✨ Generate"):
+    # --- TAB 2: VIRAL KIT ---
+    with tab2:
+        if st.button("✨ Generate Viral Data"):
             with st.spinner("Analyzing..."):
-                res = process_viral_kit("temp.mp4", st.session_state.api_key, model_id)
-                st.markdown(f"<div class='result-box'>{res}</div>", unsafe_allow_html=True)
+                res = feature_viral("temp.mp4", st.session_state.api_key, model_choice)
+                st.info(res)
 
-    # --- 3. SCRIPT ---
-    elif menu == "📝 Script Writer":
-        st.subheader("📝 Script Writer")
-        fmt = st.selectbox("Format", ["Transcript", "Blog", "Script"])
-        if st.button("✍️ Write"):
+    # --- TAB 3: SCRIPT ---
+    with tab3:
+        if st.button("✍️ Write Script"):
             with st.spinner("Writing..."):
-                res = process_script("temp.mp4", st.session_state.api_key, model_id, fmt)
-                st.text_area("Result", res, height=400)
+                res = feature_script("temp.mp4", st.session_state.api_key, model_choice)
+                st.text_area("Script", res, height=400)
 
-    # --- 4. THUMBNAIL ---
-    elif menu == "🖼️ Thumbnail":
-        st.subheader("🖼️ Thumbnail")
-        if st.button("🎨 Create Prompt"):
-            with st.spinner("Extracting..."):
-                txt, img = process_thumbnail("temp.mp4", st.session_state.api_key, model_id)
+    # --- TAB 4: THUMBNAIL ---
+    with tab4:
+        if st.button("🎨 Analyze Thumbnail"):
+            with st.spinner("Processing..."):
+                txt, img = feature_thumbnail("temp.mp4", st.session_state.api_key, model_choice)
                 st.image(img)
                 st.code(txt)
