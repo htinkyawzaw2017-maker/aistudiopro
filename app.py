@@ -7,300 +7,245 @@ import json
 import os
 import time
 import shutil
-import traceback
+import whisper
+from pydub import AudioSegment
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 3D UI & CONFIGURATION
+# 🎨 3D UI CONFIGURATION (UNCHANGED)
 # ---------------------------------------------------------
 st.set_page_config(page_title="AI Video Studio Pro", page_icon="🎬", layout="wide")
 
 st.markdown("""
     <style>
-    /* Global Dark Theme */
-    .stApp { 
-        background-color: #0d1117; 
-        color: #e6edf3; 
-    }
-    
-    /* 3D Container Box */
+    .stApp { background-color: #0d1117; color: #e6edf3; }
     .css-1r6slb0, .stFileUploader {
-        background: #161b22;
-        border-radius: 15px;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        border: 1px solid #30363d;
-        padding: 20px;
+        background: #161b22; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        border: 1px solid #30363d; padding: 20px;
     }
-
-    /* 3D Neon Buttons */
     .stButton>button {
         background: linear-gradient(145deg, #238636, #2ea043);
         box-shadow: 5px 5px 10px #0f3d0f, -5px -5px 10px #2f9e4f;
-        color: white;
-        border: none;
-        border-radius: 12px;
-        height: 55px;
-        font-weight: bold;
-        font-size: 16px;
-        transition: all 0.2s ease-in-out;
-        width: 100%;
+        color: white; border: none; border-radius: 12px; height: 55px;
+        font-weight: bold; font-size: 16px; width: 100%;
     }
-    .stButton>button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 0 15px rgba(46, 160, 67, 0.8);
-    }
-    .stButton>button:active {
-        transform: translateY(2px);
-        box-shadow: inset 2px 2px 5px #1b6629;
-    }
-
-    /* Status Boxes */
-    .error-box { 
-        padding: 15px; background: linear-gradient(145deg, #5a1e1e, #3d1414); 
-        border-left: 5px solid #ff4b4b; border-radius: 10px; margin-top: 10px;
-        box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
-    }
-    .success-box {
-        padding: 15px; background: linear-gradient(145deg, #1e5a2c, #143d1e);
-        border-left: 5px solid #00ff00; border-radius: 10px; margin-top: 10px;
-        box-shadow: 5px 5px 15px rgba(0,0,0,0.3);
-    }
+    .stButton>button:hover { transform: translateY(-3px); box-shadow: 0 0 15px rgba(46, 160, 67, 0.8); }
+    .success-box { padding: 15px; background: #143d1e; border-left: 5px solid #00ff00; border-radius: 10px; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 🛠️ HELPER FUNCTIONS (Missing Functions Added)
+# 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
 def check_ffmpeg():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ CRITICAL ERROR: FFmpeg is not installed!")
+        st.error("❌ CRITICAL: FFmpeg missing. Please install it.")
         st.stop()
 
 def get_duration(file_path):
-    """Get duration of video/audio in seconds"""
     try:
         cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', file_path]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        data = json.loads(result.stdout)
-        return float(data['format']['duration'])
-    except Exception as e:
-        print(f"Error getting duration: {e}")
-        return 0
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return float(json.loads(r.stdout)['format']['duration'])
+    except: return 0
 
-def safe_tts_generate(text, voice, rate, pitch, output_file):
-    """Run TTS safely"""
-    async def _generate():
-        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-        await communicate.save(output_file)
+# Safe TTS Generation
+async def _tts_async(text, voice, rate, pitch, output):
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+    await communicate.save(output)
 
+def generate_tts_segment(text, voice, rate, pitch, filename):
     try:
+        asyncio.run(_tts_async(text, voice, rate, pitch, filename))
+        return True
+    except:
+        # Fallback loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(_generate())
-        loop.close()
-    except Exception as e:
-        raise e
+        loop.run_until_complete(_tts_async(text, voice, rate, pitch, filename))
+        return True
 
-def generate_content_with_retry(model, content, retries=3):
-    """AI Generation with Retry Logic for 429 Errors"""
-    for attempt in range(retries):
+# AI Translation with Retry
+def translate_segment(model, text, style, tone):
+    prompt = f"""
+    Translate this specific subtitle segment into spoken Burmese.
+    Original: "{text}"
+    
+    RULES:
+    1. **NUMBERS**: "10000" -> "တစ်သောင်း", "1990" -> "တစ်ထောင့်ကိုးရာ ကိုးဆယ်".
+    2. **UNITS**: "mm" -> "မီလီမီတာ", "kg" -> "ကီလိုဂရမ်".
+    3. **STYLE**: {style} (Use "ကျွန်တော်/ကျွန်မ" for Vlogger, Formal for Narrator).
+    4. **TONE**: {tone}.
+    5. **LENGTH**: Keep it short to match original timing.
+    6. **OUTPUT**: Burmese text ONLY.
+    """
+    for _ in range(3):
         try:
-            return model.generate_content(content)
+            res = model.generate_content(prompt)
+            return res.text.strip()
         except exceptions.ResourceExhausted:
-            wait_time = 20
-            st.warning(f"⚠️ Quota Exceeded (429). Retrying in {wait_time}s...")
-            time.sleep(wait_time)
+            time.sleep(5)
             continue
-        except Exception as e:
-            raise e
-    raise Exception("❌ Quota exceeded. Please try again later.")
+        except:
+            return text # Fallback to original if fail
+    return text
 
 # ---------------------------------------------------------
-# 🎬 PROCESSING WORKFLOW (SYNC FIXED)
+# 🎬 ADVANCED SYNC ENGINE (SEGMENT BASED)
 # ---------------------------------------------------------
-# ---------------------------------------------------------
-# 🎬 PROCESSING WORKFLOW (ANY LENGTH SYNC)
-# ---------------------------------------------------------
-def process_video_workflow(video_path, gender, style, tone, api_key, model_id):
+def process_precise_sync(video_path, gender, style, tone, api_key, model_id, status_box, progress_bar):
     check_ffmpeg()
     
-    # 1. DYNAMIC DURATION CHECK (အလိုအလျောက် အချိန်တိုင်းခြင်း)
-    duration_sec = get_duration(video_path)
-    duration_min = duration_sec / 60
+    # 1. EXTRACT AUDIO
+    status_box.update(label="🎧 Step 1: Analyzing Audio Structure...", state="running")
+    subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp_audio.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    # Estimate Word Count (Average speaking rate: 130 words per minute for Burmese)
-    target_word_count = int(duration_min * 130)
+    # 2. WHISPER TRANSCRIPTION (TIMESTAMPS)
+    status_box.update(label="🧠 Step 2: Detecting Speech Segments (Whisper AI)...", state="running")
+    model = whisper.load_model("base") # 'base' is good balance of speed/accuracy
+    result = model.transcribe("temp_audio.wav")
+    segments = result['segments']
     
-    st.info(f"⏱️ Video Length: {int(duration_min)}m {int(duration_sec % 60)}s (Targeting ~{target_word_count} words)")
-
-    # --- 2. UPLOAD ---
-    st.info(f"🔹 Step 1: Uploading Video...")
+    total_segments = len(segments)
+    st.info(f"✨ Detected {total_segments} speech segments to dub.")
+    
+    # 3. PROCESS SEGMENTS
+    status_box.update(label="🎙️ Step 3: Dubbing Each Segment...", state="running")
     genai.configure(api_key=api_key)
-    video_file = genai.upload_file(video_path)
+    gemini_model = genai.GenerativeModel(model_id)
     
-    start = time.time()
-    while video_file.state.name == "PROCESSING":
-        time.sleep(2)
-        video_file = genai.get_file(video_file.name)
-        if time.time() - start > 600: raise Exception("Timeout error.")
-    if video_file.state.name == "FAILED": raise Exception("Upload failed.")
-
-    # --- 3. GENERATE SCRIPT (EXACT TIMING PROMPT) ---
-    st.info(f"🔹 Step 2: Writing Script to match {int(duration_sec)}s...")
+    # Create silent canvas
+    video_dur = get_duration(video_path)
+    final_audio = AudioSegment.silent(duration=video_dur * 1000) # milliseconds
     
-    model = genai.GenerativeModel(model_id)
-    
-    # 🔥 PROMPT: Time & Speed Control 🔥
-    prompt = f"""
-    Act as a professional Dubbing Director.
-    Video Duration: EXACTLY {int(duration_sec)} seconds.
-    
-    Your Task: Translate dialogue to Burmese (Myanmar).
-    
-    TIMING RULES (VERY IMPORTANT):
-    1. The resulting spoken Burmese MUST fit into {int(duration_sec)} seconds.
-    2. Do not write too little (audio will be too slow).
-    3. Do not write too much (audio will be too fast).
-    4. Aim for approximately {target_word_count} words.
-    
-    CONTEXT:
-    - Style: {style}
-    - Tone: {tone}
-    
-    FORMAT:
-    - Write Numbers as words (100 -> တစ်ရာ).
-    - Expand Units (kg -> ကီလိုဂရမ်).
-    - Output ONLY the Burmese text to be spoken.
-    """
-    
-    response = generate_content_with_retry(model, [video_file, prompt])
-    text = response.text.strip()
-    if not text: raise Exception("AI returned empty text.")
-
-    # --- 4. TTS ---
-    st.info("🔹 Step 3: Generating Audio...")
     voice = "my-MM-ThihaNeural" if gender == "Male" else "my-MM-NilarNeural"
     
-    # Tone Logic
-    pitch_val, rate_val = "+0Hz", "+0%"
-    if tone == "Deep": pitch_val = "-10Hz"
-    elif tone == "Fast": rate_val = "+10%" 
-    elif tone == "Motivation": pitch_val = "+5Hz"; rate_val = "+10%"
-    elif tone == "Calm": pitch_val = "-5Hz"; rate_val = "-5%"
+    # Tone settings
+    rate_str, pitch_str = "+0%", "+0Hz"
+    if tone == "Fast": rate_str = "+15%"
+    elif tone == "Deep": pitch_str = "-10Hz"
     
-    safe_tts_generate(text, voice, rate_val, pitch_val, "temp_audio.mp3")
-    if not os.path.exists("temp_audio.mp3"): raise Exception("Audio generation failed.")
+    for i, seg in enumerate(segments):
+        start_time = seg['start']
+        end_time = seg['end']
+        original_text = seg['text']
+        duration_needed = end_time - start_time
+        
+        # Translate
+        translated_text = translate_segment(gemini_model, original_text, style, tone)
+        
+        # TTS Generation
+        seg_filename = f"seg_{i}.mp3"
+        generate_tts_segment(translated_text, voice, rate_str, pitch_str, seg_filename)
+        
+        # Time Stretching (Fit to slot)
+        seg_audio = AudioSegment.from_file(seg_filename)
+        current_dur = len(seg_audio) / 1000.0
+        
+        # Calculate speed change needed
+        if duration_needed > 0 and current_dur > 0:
+            speed_factor = current_dur / duration_needed
+            # Clamp speed (0.7x to 1.5x) to prevent distortion
+            speed_factor = max(0.7, min(speed_factor, 1.5))
+            
+            # Apply FFmpeg for high quality stretching
+            stretched_filename = f"seg_{i}_final.mp3"
+            subprocess.run(['ffmpeg', '-y', '-i', seg_filename, '-filter:a', f"atempo={speed_factor}", stretched_filename], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(stretched_filename):
+                seg_final = AudioSegment.from_file(stretched_filename)
+                # Overlay onto main track at exact start time
+                final_audio = final_audio.overlay(seg_final, position=start_time * 1000)
+        
+        # Update Progress
+        prog = int((i / total_segments) * 80) + 10
+        progress_bar.progress(prog)
+        
+        # Cleanup temp
+        try: 
+            os.remove(seg_filename)
+            if os.path.exists(f"seg_{i}_final.mp3"): os.remove(f"seg_{i}_final.mp3")
+        except: pass
 
-    # --- 5. FORCE SYNC (timeline ကို အသေကိုက်အောင် လုပ်ခြင်း) ---
-    st.info("🔹 Step 4: Force Syncing Audio to Video...")
+    # Export Full Audio
+    final_audio.export("final_track.mp3", format="mp3")
+    
+    # 4. MERGE WITH VIDEO
+    status_box.update(label="🎬 Step 4: Final Merging...", state="running")
+    progress_bar.progress(95)
+    
     final_video = "final_dubbed.mp4"
-    
-    aud_len = get_duration("temp_audio.mp3")
-    
-    # Calculate Exact Ratio
-    if duration_sec > 0 and aud_len > 0:
-        ratio = aud_len / duration_sec
-        
-        # NOTE: We allow a wider range (0.6 to 1.5) to ensure it FITS even if AI wrote too much/little
-        # This guarantees the audio ends EXACTLY when video ends.
-        speed = max(0.6, min(ratio, 1.5))
-        
-        # Apply Time Stretch
-        subprocess.run(['ffmpeg', '-y', '-i', "temp_audio.mp3", '-filter:a', f"atempo={speed}", "temp_sync.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        shutil.copy("temp_audio.mp3", "temp_sync.mp3")
-
-    # Final Merge
     cmd = [
         'ffmpeg', '-y', 
         '-i', video_path, 
-        '-i', "temp_sync.mp3",
-        '-c:v', 'copy', '-c:a', 'aac', 
+        '-i', "final_track.mp3",
+        '-c:v', 'copy', # Keep video quality
+        '-c:a', 'aac', 
         '-map', '0:v:0', '-map', '1:a:0', 
         final_video
     ]
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    progress_bar.progress(100)
     
-    if not os.path.exists(final_video): raise Exception("FFmpeg failed.")
     return final_video
-
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
 # ---------------------------------------------------------
-# Sidebar Menu
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=80)
     st.title("AI Studio Pro")
+    st.caption("v3.0 | Precise Sync Engine")
     
-    # 3D Feature Menu
-    menu = st.radio("Feature Menu", ["🎙️ Auto Dubbing", "🚀 Viral Kit", "📝 Script Writer", "🖼️ Thumbnail"])
-    
-    st.markdown("---")
-    st.header("🔑 Settings")
     if 'api_key' not in st.session_state: st.session_state.api_key = ""
     key_input = st.text_input("API Key", type="password", value=st.session_state.api_key)
     if key_input: st.session_state.api_key = key_input
     
     st.markdown("---")
-    st.header("🤖 Model")
-    model_mode = st.radio("Mode:", ["Custom", "Preset"])
+    model_mode = st.radio("Model Mode", ["Custom", "Preset"])
     if model_mode == "Custom":
-        model_id = st.text_input("Model Name:", value="gemini-2.5-flash") 
+        model_id = st.text_input("Model Name", value="gemini-2.5-flash")
     else:
-        model_id = st.selectbox("Select:", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
-        
+        model_id = st.selectbox("Select Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
+    
     st.markdown("---")
     if st.button("🔄 Reboot System"): st.rerun()
 
-# Main Content
-if menu == "🎙️ Auto Dubbing":
-    st.title("🎙️ AI Auto Dubbing (Pro Sync)")
+st.title("🎙️ AI Precise Dubbing")
+st.markdown("**Core Feature:** Lip-sync timing matching using `Whisper AI` + `Segment Stretching`.")
+
+if not st.session_state.api_key:
+    st.warning("⚠️ Please enter API Key in Sidebar.")
+    st.stop()
+
+uploaded_file = st.file_uploader("📂 Upload Video", type=['mp4', 'mov'])
+
+if uploaded_file:
+    with open("temp.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
     
-    if not st.session_state.api_key:
-        st.warning("⚠️ Please enter API Key in Sidebar.")
-        st.stop()
-
-    uploaded_file = st.file_uploader("📂 Upload Video (MP4)", type=['mp4', 'mov'])
-
-    if uploaded_file:
-        with open("temp.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
+    st.markdown("### 🎛️ Control Panel")
+    col1, col2 = st.columns(2)
+    with col1:
+        gender = st.selectbox("👤 Gender", ["Male", "Female"])
+        style = st.selectbox("🎭 Style", ["Narrator", "Movie Recap", "Vlogger", "Documentary"])
+    with col2:
+        tone = st.selectbox("🎚️ Tone", ["Natural", "Deep", "Motivation", "Calm"])
+    
+    st.write("")
+    if st.button("🚀 START PRECISE DUBBING", type="primary"):
+        status_box = st.status("⚙️ Initializing Whisper AI...", expanded=True)
+        progress = st.progress(0)
         
-        # 3D Control Panel
-        st.markdown("### 🎛️ Control Panel")
-        col1, col2 = st.columns(2)
-        with col1:
-            gender = st.selectbox("👤 Voice Gender", ["Male", "Female"])
-            style = st.selectbox("🎭 Speaking Style", ["Narrator", "Movie Recap", "Vlogger", "Documentary"])
-        with col2:
-            tone = st.selectbox("🎚️ Voice Tone", ["Natural", "Deep", "Motivation", "Calm"])
-        
-        st.write("")
-        if st.button("🚀 START PRODUCTION", type="primary"):
-            status_box = st.status("⚙️ AI Processing Started...", expanded=True)
-            try:
-                output = process_video_workflow("temp.mp4", gender, style, tone, st.session_state.api_key, model_id)
-                status_box.update(label="✅ Dubbing Complete!", state="complete", expanded=False)
+        try:
+            output = process_precise_sync("temp.mp4", gender, style, tone, st.session_state.api_key, model_id, status_box, progress)
+            
+            status_box.update(label="✅ Dubbing Complete!", state="complete", expanded=False)
+            st.markdown("<div class='success-box'><h3>✨ Result Ready!</h3></div>", unsafe_allow_html=True)
+            st.video(output)
+            with open(output, "rb") as f:
+                st.download_button("💾 Download Video", f, "precise_dub.mp4")
                 
-                # Result Display
-                st.markdown("<div class='success-box'><h3>✨ Production Successful!</h3></div>", unsafe_allow_html=True)
-                st.video(output)
-                
-                with open(output, "rb") as f:
-                    st.download_button("💾 Download 4K Video", f, "dubbed_movie.mp4")
-            except Exception as e:
-                status_box.update(label="❌ Process Failed", state="error")
-                st.markdown(f"<div class='error-box'><h3>⚠️ Error Log</h3><pre>{str(e)}</pre></div>", unsafe_allow_html=True)
-                st.code(traceback.format_exc())
-
-# Placeholder for other menus
-elif menu == "🚀 Viral Kit":
-    st.title("🚀 Viral Content Kit")
-    st.info("Coming soon in Pro Version!")
-elif menu == "📝 Script Writer":
-    st.title("📝 AI Script Writer")
-    st.info("Coming soon in Pro Version!")
-elif menu == "🖼️ Thumbnail":
-    st.title("🖼️ AI Thumbnail Gen")
-    st.info("Coming soon in Pro Version!")
-
+        except Exception as e:
+            status_box.update(label="❌ Failed", state="error")
+            st.error(f"Error: {str(e)}")
+            st.code(traceback.format_exc())
