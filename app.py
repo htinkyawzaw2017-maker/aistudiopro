@@ -11,7 +11,6 @@ import whisper
 import re
 from pydub import AudioSegment
 from PIL import Image
-from google.api_core import exceptions
 
 # ---------------------------------------------------------
 # 💾 STATE MANAGEMENT
@@ -32,7 +31,6 @@ st.markdown("""
         border-radius: 10px; font-size: 16px;
     }
     .success-box { padding: 15px; background: #051a05; border: 1px solid #00ff00; border-radius: 10px; }
-    .wait-box { padding: 10px; background: #332b00; border: 1px solid #ffcc00; color: #ffcc00; border-radius: 5px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -64,34 +62,10 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🛡️ API RETRY LOGIC (QUOTA FIX)
-# ---------------------------------------------------------
-def generate_content_with_retry(model, content):
-    """
-    Tries to generate content. If Quota Exceeded (429), waits and retries.
-    """
-    retries = 3
-    for attempt in range(retries):
-        try:
-            return model.generate_content(content).text
-        except exceptions.ResourceExhausted:
-            wait_time = 30 # Wait longer for free tier reset
-            st.markdown(f"""
-                <div class="wait-box">
-                    ⚠️ Free Tier Limit Reached. Waiting {wait_time}s to cooldown ({attempt+1}/{retries})...
-                </div>
-            """, unsafe_allow_html=True)
-            time.sleep(wait_time)
-            continue
-        except Exception as e:
-            return f"Error: {str(e)}"
-    
-    return "❌ Server Busy. Please try again in 1 minute."
-
-# ---------------------------------------------------------
-# 🧠 BATCH TRANSLATION
+# 🧠 BATCH TRANSLATION (The Fix for Repeating Audio)
 # ---------------------------------------------------------
 def batch_translate(model, segments, style):
+    # 1. Combine all text into one block with separators
     full_text = " ||| ".join([seg['text'].strip() for seg in segments])
     
     prompt = f"""
@@ -110,61 +84,73 @@ def batch_translate(model, segments, style):
     5. NO EXPLANATIONS. JUST THE TRANSLATED STRING.
     """
     
-    # Use Retry Logic Here too
-    translated_string = generate_content_with_retry(model, prompt)
-    
     try:
-        # Clean English characters just in case
+        response = model.generate_content(prompt)
+        translated_string = response.text.strip()
+        
+        # 2. Clean English characters just in case
         cleaned_string = re.sub(r'[A-Za-z]', '', translated_string)
+        
+        # 3. Split back into list
         translated_segments = cleaned_string.split("|||")
         
+        # Ensure list length matches
         if len(translated_segments) != len(segments):
+            # Fallback: If mismatch, return original text to avoid crashing
             return [s['text'] for s in segments]
             
         return [t.strip() for t in translated_segments]
         
-    except:
-        return [s['text'] for s in segments]
+    except Exception as e:
+        print(f"Batch Error: {e}")
+        return [s['text'] for s in segments] # Fail safe: use original text
 
 # ---------------------------------------------------------
-# 🎬 MAIN DUBBING WORKFLOW
+# 🎬 MAIN WORKFLOW
 # ---------------------------------------------------------
 def process_full_workflow(video_path, voice_data, style, api_key, model_name, status, progress):
     check_requirements()
     
+    # 1. Extract Audio
     status.update(label="🎧 Extracting Audio...", state="running")
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
+    # 2. Whisper Transcription
     status.update(label="🧠 Analyzing Speech...", state="running")
     whisper_model = whisper.load_model("base")
     result = whisper_model.transcribe("temp.wav")
     segments = result['segments']
     
+    # 3. BATCH TRANSLATION (ONE API CALL)
     status.update(label="🎙️ Translating (Batch Mode)...", state="running")
     genai.configure(api_key=api_key)
+    try: model = genai.GenerativeModel(model_name)
+    except: model = genai.GenerativeModel("gemini-1.5-flash")
     
-    # 🔥 Fallback to 1.5-flash if 2.5 fails (Cost Saver)
-    try: 
-        model = genai.GenerativeModel(model_name)
-    except: 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-    
+    # Get all translations at once
     translated_texts = batch_translate(model, segments, style)
 
+    # 4. Generate Audio & Sync
     status.update(label="🔊 Generating Audio...", state="running")
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
     total = len(segments)
     
     for i, seg in enumerate(segments):
         start, end = seg['start'], seg['end']
-        try: burmese_text = translated_texts[i]
-        except: burmese_text = seg['text']
-            
-        if not burmese_text.strip(): continue
         
+        # Get corresponding translated text
+        try:
+            burmese_text = translated_texts[i]
+        except:
+            burmese_text = seg['text'] # Index fallback
+            
+        if not burmese_text.strip(): continue # Skip empty
+        
+        # TTS
         fname = f"seg_{i}.mp3"
         generate_audio(burmese_text, voice_data["id"], voice_data["rate"], voice_data["pitch"], fname)
         
+        # Sync Logic
         if os.path.exists(fname):
             seg_audio = AudioSegment.from_file(fname)
             curr_dur = len(seg_audio) / 1000.0
@@ -184,6 +170,7 @@ def process_full_workflow(video_path, voice_data, style, api_key, model_name, st
 
     final_audio.export("final_track.mp3", format="mp3")
     
+    # 5. Merge
     status.update(label="🎬 Finalizing...", state="running")
     output_filename = f"dubbed_{int(time.time())}.mp4"
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', output_filename], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -191,32 +178,21 @@ def process_full_workflow(video_path, voice_data, style, api_key, model_name, st
     return output_filename
 
 # ---------------------------------------------------------
-# 🚀 FEATURES WITH ROBUST RETRY
+# 🚀 FEATURES
 # ---------------------------------------------------------
-def run_genai_features(prompt, video_path, api_key, model_name):
+def run_genai(prompt, video_path, api_key, model_name):
     genai.configure(api_key=api_key)
-    
-    try:
-        f = genai.upload_file(video_path)
-        while f.state.name == "PROCESSING":
-            time.sleep(2)
-            f = genai.get_file(f.name)
-    except exceptions.ResourceExhausted:
-        return "⚠️ Quota Limit. Please try again in 1 minute."
-
+    f = genai.upload_file(video_path)
+    while f.state.name == "PROCESSING": time.sleep(2); f = genai.get_file(f.name)
     model = genai.GenerativeModel(model_name)
-    
-    # 🔥 Use Retry Wrapper
-    return generate_content_with_retry(model, [f, prompt])
+    return model.generate_content([f, prompt]).text
 
 def run_thumbnail(video_path, api_key, model_name):
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vframes', '1', 'thumb.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     genai.configure(api_key=api_key)
     img = Image.open("thumb.jpg")
     model = genai.GenerativeModel(model_name)
-    
-    result_text = generate_content_with_retry(model, [img, "Describe this for a high CTR YouTube Thumbnail prompt."])
-    return result_text, "thumb.jpg"
+    return model.generate_content([img, "Describe this for a Thumbnail prompt."]).text, "thumb.jpg"
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
@@ -227,10 +203,7 @@ with st.sidebar:
     if api_key: st.session_state.api_key = api_key
     
     st.divider()
-    # 🔥 DEFAULT TO 1.5-FLASH FOR FREE TIER SAFETY
-    model_name = st.text_input("Model", value="gemini-1.5-flash")
-    st.caption("Tip: Use 'gemini-1.5-flash' for unlimited free tier.")
-    
+    model_name = st.text_input("Model", value="gemini-2.5-flash")
     if st.button("🔴 Force Reset"):
         st.session_state.processed_video = None
         st.rerun()
@@ -247,8 +220,9 @@ if uploaded_file:
 
     # 1. DUBBING
     with t1:
-        st.subheader("🔊 Auto Dubbing")
+        st.subheader("🔊 Auto Dubbing (Batch Fixed)")
         
+        # Display Processed Video from Memory
         if st.session_state.processed_video and os.path.exists(st.session_state.processed_video):
             st.markdown('<div class="success-box"><h3>✅ Video Ready!</h3></div>', unsafe_allow_html=True)
             st.video(st.session_state.processed_video)
@@ -256,8 +230,10 @@ if uploaded_file:
                 st.download_button("💾 Download", f, "final_dub.mp4")
 
         c1, c2 = st.columns(2)
-        with c1: narrator = st.selectbox("Narrator", ["Male (Thiha)", "Female (Nilar)"])
-        with c2: style = st.selectbox("Style", ["Natural", "News", "Dramatic"])
+        with c1:
+            narrator = st.selectbox("Narrator", ["Male (Thiha)", "Female (Nilar)"])
+        with c2:
+            style = st.selectbox("Style", ["Natural", "News", "Dramatic"])
             
         v_data = {
             "Male (Thiha)": {"id": "my-MM-ThihaNeural", "rate": "+0%", "pitch": "+0Hz"},
@@ -268,6 +244,7 @@ if uploaded_file:
             status = st.status("Processing...", expanded=True)
             prog = st.progress(0)
             try:
+                # Calls the new batch workflow
                 out = process_full_workflow("temp.mp4", v_data[narrator], style, st.session_state.api_key, model_name, status, prog)
                 st.session_state.processed_video = out
                 status.update(label="✅ Done!", state="complete")
@@ -279,21 +256,21 @@ if uploaded_file:
     # 2. VIRAL KIT
     with t2:
         if st.button("✨ Generate Viral Info"):
-            with st.spinner("Analyzing (With Auto-Retry)..."):
-                res = run_genai_features("Generate 3 Viral Titles (Burmese) & Hashtags.", "temp.mp4", st.session_state.api_key, model_name)
+            with st.spinner("Processing..."):
+                res = run_genai("Generate 3 Viral Titles (Burmese) & Hashtags.", "temp.mp4", st.session_state.api_key, model_name)
                 st.info(res)
 
     # 3. SCRIPT
     with t3:
         if st.button("✍️ Write Script"):
-            with st.spinner("Writing (With Auto-Retry)..."):
-                res = run_genai_features("Write a full Burmese script.", "temp.mp4", st.session_state.api_key, model_name)
+            with st.spinner("Writing..."):
+                res = run_genai("Write a full Burmese script.", "temp.mp4", st.session_state.api_key, model_name)
                 st.text_area("Script", res, height=400)
 
     # 4. THUMBNAIL
     with t4:
         if st.button("🎨 Thumbnail Idea"):
-            with st.spinner("Analyzing Image..."):
+            with st.spinner("Analyzing..."):
                 txt, img = run_thumbnail("temp.mp4", st.session_state.api_key, model_name)
                 st.image(img)
                 st.code(txt)
