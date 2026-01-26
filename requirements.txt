@@ -2,4 +2,5 @@ streamlit
 google-generativeai
 edge-tts
 ffmpeg-python
-Pillow
+openai-whisper
+pydub
