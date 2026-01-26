@@ -1,16 +1,23 @@
+import warnings
+# 1. Warning များကို ပိတ်ခြင်း (User စိတ်မညစ်ရအောင်)
+warnings.filterwarnings("ignore")
+import os
+os.environ["GRPC_VERBOSITY"] = "ERROR"
+os.environ["GLOG_minloglevel"] = "2"
+
 import streamlit as st
 import google.generativeai as genai
 import edge_tts
 import asyncio
 import subprocess
 import json
-import os
 import time
 import shutil
 import whisper
 import re
 from pydub import AudioSegment
 from PIL import Image
+from google.api_core import exceptions
 
 # ---------------------------------------------------------
 # 💾 STATE MANAGEMENT
@@ -26,11 +33,12 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
     .stButton>button {
-        background: linear-gradient(90deg, #FF4B2B, #FF416C); 
-        color: white; border: none; height: 50px; font-weight: bold; width: 100%;
+        background: linear-gradient(90deg, #00C9FF, #92FE9D); 
+        color: black; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .success-box { padding: 15px; background: #051a05; border: 1px solid #00ff00; border-radius: 10px; }
+    .success-box { padding: 15px; background: #051a05; border: 1px solid #00ff00; border-radius: 10px; margin-bottom: 20px;}
+    .wait-box { padding: 10px; background: #332b00; border: 1px solid #ffcc00; color: #ffcc00; border-radius: 5px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -62,48 +70,62 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🧠 BATCH TRANSLATION (The Fix for Repeating Audio)
+# 🛡️ API RETRY & SMART TRANSLATION LOGIC
 # ---------------------------------------------------------
-def batch_translate(model, segments, style):
-    # 1. Combine all text into one block with separators
-    full_text = " ||| ".join([seg['text'].strip() for seg in segments])
-    
-    prompt = f"""
-    Act as a Burmese Dubbing Expert.
-    Translate the following text segments from English to Burmese (Myanmar).
-    The segments are separated by " ||| ". Keep the separators in your output.
-    
-    INPUT TEXT:
-    "{full_text}"
-    
-    STRICT RULES:
-    1. OUTPUT BURMESE ONLY. NO ENGLISH CHARACTERS.
-    2. Maintain the " ||| " separators exactly.
-    3. Convert numbers to words (e.g., 500 -> ငါးရာ).
-    4. Style: {style}.
-    5. NO EXPLANATIONS. JUST THE TRANSLATED STRING.
+def generate_content_with_retry(model, content, is_translation=False, style="Natural"):
     """
+    Handles API calls with Auto-Retry for Free Tier Limits.
+    Includes Smart Prompting for Translation.
+    """
+    retries = 3
     
-    try:
-        response = model.generate_content(prompt)
-        translated_string = response.text.strip()
+    # If it's a translation task, we wrap the content in a powerful prompt
+    final_content = content
+    if is_translation and isinstance(content, str):
+        final_content = f"""
+        Act as a professional Burmese Translator and Dubbing Artist.
+        Translate the following English text to Burmese (Myanmar).
         
-        # 2. Clean English characters just in case
-        cleaned_string = re.sub(r'[A-Za-z]', '', translated_string)
+        INPUT: "{content}"
         
-        # 3. Split back into list
-        translated_segments = cleaned_string.split("|||")
-        
-        # Ensure list length matches
-        if len(translated_segments) != len(segments):
-            # Fallback: If mismatch, return original text to avoid crashing
-            return [s['text'] for s in segments]
+        STRICT RULES FOR HIGHEST QUALITY:
+        1. **Numbers**: Convert ALL numbers to Burmese spoken words. 
+           (e.g., "10000" -> "တစ်သောင်း", "1995" -> "တစ်ထောင့်ကိုးရာကိုးဆယ့်ငါး", "5" -> "ငါး").
+        2. **Units**: Convert units to full Burmese words.
+           (e.g., "mm" -> "မီလီမီတာ", "km" -> "ကီလိုမီတာ", "%" -> "ရာခိုင်နှုန်း").
+        3. **Style/Tone**: {style}. Make it flow naturally like a real human speaking.
+        4. **Output**: ONLY the Burmese translation. No explanations. No English characters.
+        """
+
+    for attempt in range(retries):
+        try:
+            # If content is a list (for images/video), pass as list. If string, pass as string or prompt.
+            if isinstance(final_content, str):
+                response = model.generate_content(final_content)
+            else:
+                response = model.generate_content(final_content)
+                
+            return response.text.strip()
             
-        return [t.strip() for t in translated_segments]
-        
-    except Exception as e:
-        print(f"Batch Error: {e}")
-        return [s['text'] for s in segments] # Fail safe: use original text
+        except exceptions.ResourceExhausted:
+            wait_time = 20 # Free tier limit hit
+            st.markdown(f"""
+                <div class="wait-box">
+                    ⚠️ Free Tier Limit Hit. Waiting {wait_time}s... ({attempt+1}/{retries})
+                </div>
+            """, unsafe_allow_html=True)
+            time.sleep(wait_time)
+            continue
+        except Exception as e:
+            return f"Error: {str(e)}"
+            
+    return "Translation Failed"
+
+def clean_burmese_text(text):
+    # Remove English characters that might sneak in (A-Z, a-z)
+    # Keep Burmese characters, numbers, and basic punctuation
+    cleaned = re.sub(r'[A-Za-z]', '', text)
+    return cleaned.strip()
 
 # ---------------------------------------------------------
 # 🎬 MAIN WORKFLOW
@@ -116,48 +138,47 @@ def process_full_workflow(video_path, voice_data, style, api_key, model_name, st
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 2. Whisper Transcription
-    status.update(label="🧠 Analyzing Speech...", state="running")
+    status.update(label="🧠 Listening (Whisper AI)...", state="running")
     whisper_model = whisper.load_model("base")
     result = whisper_model.transcribe("temp.wav")
     segments = result['segments']
     
-    # 3. BATCH TRANSLATION (ONE API CALL)
-    status.update(label="🎙️ Translating (Batch Mode)...", state="running")
+    # 3. Smart Translation & Dubbing Loop
+    status.update(label="🎙️ Translating & Dubbing (Smart Mode)...", state="running")
     genai.configure(api_key=api_key)
+    
+    # 🔥 Force Free Tier Model if not specified
     try: model = genai.GenerativeModel(model_name)
     except: model = genai.GenerativeModel("gemini-1.5-flash")
-    
-    # Get all translations at once
-    translated_texts = batch_translate(model, segments, style)
 
-    # 4. Generate Audio & Sync
-    status.update(label="🔊 Generating Audio...", state="running")
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
     total = len(segments)
     
     for i, seg in enumerate(segments):
         start, end = seg['start'], seg['end']
+        orig_text = seg['text']
         
-        # Get corresponding translated text
-        try:
-            burmese_text = translated_texts[i]
-        except:
-            burmese_text = seg['text'] # Index fallback
-            
-        if not burmese_text.strip(): continue # Skip empty
+        # Translate with Retry Logic & Smart Prompt
+        translated_text = generate_content_with_retry(model, orig_text, is_translation=True, style=style)
+        
+        # Cleanup
+        burmese_text = clean_burmese_text(translated_text)
+        
+        if not burmese_text: continue
         
         # TTS
         fname = f"seg_{i}.mp3"
         generate_audio(burmese_text, voice_data["id"], voice_data["rate"], voice_data["pitch"], fname)
         
-        # Sync Logic
+        # Sync Logic (Time Stretching)
         if os.path.exists(fname):
             seg_audio = AudioSegment.from_file(fname)
             curr_dur = len(seg_audio) / 1000.0
             target_dur = end - start
             
             if curr_dur > 0 and target_dur > 0:
-                speed = max(0.6, min(curr_dur / target_dur, 1.5))
+                # Limit speed change to avoid robotic sound (0.6x to 1.6x)
+                speed = max(0.6, min(curr_dur / target_dur, 1.6))
                 subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", f"s_{i}.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 if os.path.exists(f"s_{i}.mp3"):
@@ -165,34 +186,39 @@ def process_full_workflow(video_path, voice_data, style, api_key, model_name, st
                     final_audio = final_audio.overlay(final_seg, position=start * 1000)
         
         progress.progress((i + 1) / total)
+        # Cleanup temp files
         try: os.remove(fname); os.remove(f"s_{i}.mp3")
         except: pass
 
     final_audio.export("final_track.mp3", format="mp3")
     
     # 5. Merge
-    status.update(label="🎬 Finalizing...", state="running")
+    status.update(label="🎬 Finalizing Video...", state="running")
     output_filename = f"dubbed_{int(time.time())}.mp4"
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', output_filename], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     return output_filename
 
 # ---------------------------------------------------------
-# 🚀 FEATURES
+# 🚀 FEATURES WRAPPERS
 # ---------------------------------------------------------
-def run_genai(prompt, video_path, api_key, model_name):
+def run_genai_features(prompt, video_path, api_key, model_name):
     genai.configure(api_key=api_key)
-    f = genai.upload_file(video_path)
-    while f.state.name == "PROCESSING": time.sleep(2); f = genai.get_file(f.name)
+    try:
+        f = genai.upload_file(video_path)
+        while f.state.name == "PROCESSING": time.sleep(2); f = genai.get_file(f.name)
+    except exceptions.ResourceExhausted: return "⚠️ Limit Reached. Wait 1 min."
+    except Exception as e: return f"Upload Error: {e}"
+    
     model = genai.GenerativeModel(model_name)
-    return model.generate_content([f, prompt]).text
+    return generate_content_with_retry(model, [f, prompt])
 
 def run_thumbnail(video_path, api_key, model_name):
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vframes', '1', 'thumb.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     genai.configure(api_key=api_key)
     img = Image.open("thumb.jpg")
     model = genai.GenerativeModel(model_name)
-    return model.generate_content([img, "Describe this for a Thumbnail prompt."]).text, "thumb.jpg"
+    return generate_content_with_retry(model, [img, "Describe this for a Thumbnail prompt."]), "thumb.jpg"
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
@@ -203,7 +229,10 @@ with st.sidebar:
     if api_key: st.session_state.api_key = api_key
     
     st.divider()
-    model_name = st.text_input("Model", value="gemini-2.5-flash")
+    # 🔥 DEFAULT TO 1.5-FLASH FOR FREE TIER (BILL SAVER)
+    model_name = st.text_input("Model", value="gemini-1.5-flash")
+    st.caption("✅ Recommended: gemini-1.5-flash for Free Tier")
+    
     if st.button("🔴 Force Reset"):
         st.session_state.processed_video = None
         st.rerun()
@@ -220,9 +249,7 @@ if uploaded_file:
 
     # 1. DUBBING
     with t1:
-        st.subheader("🔊 Auto Dubbing (Batch Fixed)")
-        
-        # Display Processed Video from Memory
+        st.subheader("🔊 Auto Dubbing")
         if st.session_state.processed_video and os.path.exists(st.session_state.processed_video):
             st.markdown('<div class="success-box"><h3>✅ Video Ready!</h3></div>', unsafe_allow_html=True)
             st.video(st.session_state.processed_video)
@@ -230,10 +257,8 @@ if uploaded_file:
                 st.download_button("💾 Download", f, "final_dub.mp4")
 
         c1, c2 = st.columns(2)
-        with c1:
-            narrator = st.selectbox("Narrator", ["Male (Thiha)", "Female (Nilar)"])
-        with c2:
-            style = st.selectbox("Style", ["Natural", "News", "Dramatic"])
+        with c1: narrator = st.selectbox("Narrator", ["Male (Thiha)", "Female (Nilar)"])
+        with c2: style = st.selectbox("Style", ["Natural", "News", "Dramatic", "Vlog"])
             
         v_data = {
             "Male (Thiha)": {"id": "my-MM-ThihaNeural", "rate": "+0%", "pitch": "+0Hz"},
@@ -244,7 +269,6 @@ if uploaded_file:
             status = st.status("Processing...", expanded=True)
             prog = st.progress(0)
             try:
-                # Calls the new batch workflow
                 out = process_full_workflow("temp.mp4", v_data[narrator], style, st.session_state.api_key, model_name, status, prog)
                 st.session_state.processed_video = out
                 status.update(label="✅ Done!", state="complete")
@@ -257,14 +281,14 @@ if uploaded_file:
     with t2:
         if st.button("✨ Generate Viral Info"):
             with st.spinner("Processing..."):
-                res = run_genai("Generate 3 Viral Titles (Burmese) & Hashtags.", "temp.mp4", st.session_state.api_key, model_name)
+                res = run_genai_features("Generate 3 Viral Titles (Burmese) & Hashtags.", "temp.mp4", st.session_state.api_key, model_name)
                 st.info(res)
 
     # 3. SCRIPT
     with t3:
         if st.button("✍️ Write Script"):
             with st.spinner("Writing..."):
-                res = run_genai("Write a full Burmese script.", "temp.mp4", st.session_state.api_key, model_name)
+                res = run_genai_features("Write a full Burmese script.", "temp.mp4", st.session_state.api_key, model_name)
                 st.text_area("Script", res, height=400)
 
     # 4. THUMBNAIL
