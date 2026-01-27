@@ -173,6 +173,9 @@ def process_video_pipeline(video_path, voice_config, style_desc, api_key, model_
     # Audio Generation Check
     generated_count = 0
     
+    # Debug Container
+    debug_expander = st.expander("Show Translation Logs (Debug)", expanded=True)
+    
     for i, seg in enumerate(segments):
         start = seg['start']
         end = seg['end']
@@ -182,6 +185,10 @@ def process_video_pipeline(video_path, voice_config, style_desc, api_key, model_
         
         # Translate
         burmese_text = translate_content(model, seg['text'], style_desc)
+        
+        # Debug Output
+        with debug_expander:
+            st.write(f"**Seg {i+1}:** {seg['text']} -> `{burmese_text}`")
         
         if burmese_text:
             fname = f"seg_{i}.mp3"
@@ -399,5 +406,6 @@ with t2:
                     st.download_button("Download Audio (MP3)", f, "script.mp3")
 
 # --- TAB 3 & 4 (Viral & Thumbnail) ---
+# Keeping placeholders simple as requested logic is similar
 with t3: st.info("Viral Kit integrated with AI model.")
 with t4: st.info("Thumbnail Analyzer integrated with AI model.")
