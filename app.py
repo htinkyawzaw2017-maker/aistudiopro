@@ -19,12 +19,15 @@ from PIL import Image
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 💾 STATE & CONFIG
+# 💾 STATE MANAGEMENT
 # ---------------------------------------------------------
 if 'processed_video' not in st.session_state: st.session_state.processed_video = None
 if 'generated_script' not in st.session_state: st.session_state.generated_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 
+# ---------------------------------------------------------
+# 🎨 UI SETUP
+# ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🇲🇲", layout="wide")
 st.markdown("""
     <style>
@@ -39,50 +42,50 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 🛠️ CORE FUNCTIONS
+# 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
 def check_requirements():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please install FFmpeg on the server."); st.stop()
+        st.error("❌ FFmpeg is missing. Please install FFmpeg."); st.stop()
 
 def get_audio_duration_file(path):
     try:
         cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
         r = subprocess.run(cmd, capture_output=True, text=True)
-        data = json.loads(r.stdout)
-        return float(data['format']['duration'])
+        return float(json.loads(r.stdout)['format']['duration'])
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (SMART SYNC)
+# 🔊 ROBUST AUDIO ENGINE (LIBRARY METHOD)
 # ---------------------------------------------------------
-async def tts_gen(text, voice, rate, pitch, output_file):
+async def tts_generation_async(text, voice, rate, pitch, output_file):
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
     await communicate.save(output_file)
 
 def generate_audio(text, voice_config, filename):
     try:
+        # Create a FRESH loop for every call to avoid Cloud concurrency issues
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(tts_gen(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], filename))
+        loop.run_until_complete(tts_generation_async(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], filename))
         loop.close()
-        return os.path.exists(filename) and os.path.getsize(filename) > 100
-    except: return False
+        
+        # Verify file
+        if os.path.exists(filename) and os.path.getsize(filename) > 100:
+            return True
+        return False
+    except Exception as e:
+        print(f"TTS Error: {e}")
+        return False
 
-def fit_audio_to_duration(input_file, output_file, target_duration):
-    """
-    Stretches or compresses audio to fit EXACTLY into the target duration.
-    Prevents overlapping.
-    """
-    current_duration = get_audio_duration_file(input_file)
-    if current_duration == 0: return False
+def fit_audio_to_time(input_file, output_file, target_duration):
+    # Smart Sync: Stretch audio to fit the segment time exactly
+    curr = get_audio_duration_file(input_file)
+    if curr == 0: return False
     
-    # Calculate speed factor
-    speed = current_duration / target_duration
-    
-    # Safety Clamps: Don't go too fast (chipmunk) or too slow (robot)
-    # If it needs to be 3x faster, we clamp to 2.0x and accept slight overlap OR cut silence
-    speed = max(0.5, min(speed, 2.0)) 
+    speed = curr / target_duration
+    # Clamp speed to avoid crazy robot sounds (0.5x to 2.0x)
+    speed = max(0.5, min(speed, 2.0))
     
     try:
         subprocess.run(['ffmpeg', '-y', '-i', input_file, '-filter:a', f"atempo={speed}", output_file], 
@@ -91,24 +94,22 @@ def fit_audio_to_duration(input_file, output_file, target_duration):
     except: return False
 
 # ---------------------------------------------------------
-# 🛡️ TEXT CLEANER
+# 🛡️ TRANSLATION ENGINE
 # ---------------------------------------------------------
 def clean_burmese(text):
-    replacements = {
-        "No.": "နံပါတ် ", "kg": " ကီလို ", "cm": " စင်တီမီတာ ", 
-        "mm": " မီလီမီတာ ", "km": " ကီလိုမီတာ ", "%": " ရာခိုင်နှုန်း ", 
-        "$": " ဒေါ်လာ ", "Mr.": "မစ္စတာ "
-    }
+    # Fix Units
+    replacements = {"No.": "နံပါတ် ", "kg": " ကီလို ", "cm": " စင်တီမီတာ ", "mm": " မီလီမီတာ ", "%": " ရာခိုင်နှုန်း ", "$": " ဒေါ်လာ "}
     for k, v in replacements.items():
         text = re.sub(re.escape(k), v, text, flags=re.IGNORECASE)
+    # Remove English
     cleaned = re.sub(r'[A-Za-z]', '', text)
     return cleaned.strip()
 
 def translate_content(model, text, style):
     prompt = f"""
-    Translate English to spoken Burmese.
+    Translate English to Spoken Burmese.
     Input: "{text}"
-    Rules: Burmese ONLY. No English words. Numbers to words. Tone: {style}.
+    Rules: Burmese ONLY. No English. Numbers to words. Tone: {style}.
     """
     for _ in range(2):
         try:
@@ -120,103 +121,88 @@ def translate_content(model, text, style):
     return ""
 
 # ---------------------------------------------------------
-# 🎬 MAIN PIPELINE
+# 🎬 VIDEO PIPELINE
 # ---------------------------------------------------------
-def process_video_dubbing(video_path, voice_config, style, mix_original, bg_volume, api_key, model_name, status, progress):
+def process_video_pipeline(video_path, voice_config, style, mix_bg, bg_vol, api_key, model_name, status, progress):
     check_requirements()
     
     # 1. Extract
-    status.info("🎧 Extracting Audio...")
+    status.info("🎧 Step 1: Extracting Audio...")
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 2. Whisper
-    status.info("🧠 Analyzing Timing...")
+    status.info("🧠 Step 2: Speech Recognition...")
     whisper_model = whisper.load_model("base")
     result = whisper_model.transcribe("temp.wav")
     segments = result['segments']
     
-    # 3. Dubbing
-    status.info(f"🎙️ Dubbing {len(segments)} segments...")
+    # 3. Dubbing Loop
+    status.info(f"🎙️ Step 3: Dubbing {len(segments)} segments...")
     genai.configure(api_key=api_key)
     try: model = genai.GenerativeModel(model_name)
     except: model = genai.GenerativeModel("gemini-1.5-flash")
 
-    # Audio Canvas
     total_dur = get_audio_duration_file(video_path)
     final_audio = AudioSegment.silent(duration=total_dur * 1000)
     
-    # Debug Log
-    log_expander = st.expander("Translation Details", expanded=False)
+    # Translation Log
+    log_box = st.expander("Show Translation Log", expanded=False)
     
     for i, seg in enumerate(segments):
-        # Determine strict time slot
-        start_time = seg['start']
-        end_time = seg['end']
+        start = seg['start']
+        end = seg['end']
         
-        # Look ahead to next segment to prevent overlap
+        # Calculate allowed duration
         if i < len(segments) - 1:
-            next_start = segments[i+1]['start']
-            # Allow max duration up to next segment start
-            max_duration = next_start - start_time
+            max_dur = segments[i+1]['start'] - start
         else:
-            max_duration = end_time - start_time + 2.0 # Last segment gets leeway
+            max_dur = end - start + 2.0
             
         # Translate
         text = translate_content(model, seg['text'], style)
-        with log_expander: st.text(f"{i+1}: {text}")
+        with log_box: st.text(f"{i+1}: {text}")
         
         if text:
-            # Generate Raw Audio
-            raw_file = f"raw_{i}.mp3"
-            generate_audio(text, voice_config, raw_file)
-            
-            if os.path.exists(raw_file):
-                # Smart Fit: Compress audio if it's longer than the slot
-                processed_file = f"proc_{i}.mp3"
-                success = fit_audio_to_duration(raw_file, processed_file, max_duration)
-                
-                if success and os.path.exists(processed_file):
-                    seg_audio = AudioSegment.from_file(processed_file)
-                    final_audio = final_audio.overlay(seg_audio, position=start_time * 1000)
-                    try: os.remove(processed_file)
+            raw = f"raw_{i}.mp3"
+            if generate_audio(text, voice_config, raw):
+                proc = f"proc_{i}.mp3"
+                # Time Stretch to prevent overlapping
+                if fit_audio_to_time(raw, proc, max_dur) and os.path.exists(proc):
+                    seg_audio = AudioSegment.from_file(proc)
+                    final_audio = final_audio.overlay(seg_audio, position=start * 1000)
+                    try: os.remove(proc)
                     except: pass
-                
-                try: os.remove(raw_file)
+                else:
+                    # Fallback to raw if ffmpeg failed
+                    seg_audio = AudioSegment.from_file(raw)
+                    final_audio = final_audio.overlay(seg_audio, position=start * 1000)
+                try: os.remove(raw)
                 except: pass
         
-        # Rate limit
         time.sleep(1)
         progress.progress((i + 1) / len(segments))
 
-    # 4. Mixing (Background Music Logic)
-    status.info("🔊 Mixing Final Audio...")
-    final_audio.export("voice_track.mp3", format="mp3")
-    
-    # Merge Logic
+    # 4. Mixing
+    status.info("🔊 Step 4: Mixing...")
+    final_audio.export("voice.mp3", format="mp3")
     output_file = f"dubbed_{int(time.time())}.mp4"
     
-    if mix_original:
-        # Complex Filter: Keep original audio at lower volume, mix with new voice
-        # [0:a]volume=0.1[bg];[1:a]volume=1.0[fg];[bg][fg]amix=inputs=2:duration=first[out]
-        vol_factor = bg_volume / 100.0
+    # Mix Logic
+    if mix_bg:
+        vol = bg_vol / 100.0
+        # Complex filter to mix original audio (bg) with new voice (fg)
         cmd = [
-            'ffmpeg', '-y',
-            '-i', video_path,
-            '-i', 'voice_track.mp3',
-            '-filter_complex', f'[0:a]volume={vol_factor}[bg];[1:a]volume=1.5[fg];[bg][fg]amix=inputs=2:duration=first[aout]',
+            'ffmpeg', '-y', '-i', video_path, '-i', 'voice.mp3',
+            '-filter_complex', f'[0:a]volume={vol}[bg];[1:a]volume=1.5[fg];[bg][fg]amix=inputs=2:duration=first[aout]',
             '-map', '0:v', '-map', '[aout]',
-            '-c:v', 'copy', '-c:a', 'aac',
-            output_file
+            '-c:v', 'copy', '-c:a', 'aac', output_file
         ]
     else:
-        # Simple Replacement (Mute original)
+        # Replace audio completely
         cmd = [
-            'ffmpeg', '-y',
-            '-i', video_path,
-            '-i', 'voice_track.mp3',
+            'ffmpeg', '-y', '-i', video_path, '-i', 'voice.mp3',
             '-map', '0:v', '-map', '1:a',
-            '-c:v', 'copy', '-c:a', 'aac',
-            output_file
+            '-c:v', 'copy', '-c:a', 'aac', output_file
         ]
         
     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -230,13 +216,13 @@ def generate_script(topic, type, tone, prompt, api_key, model_name):
     model = genai.GenerativeModel(model_name)
     return model.generate_content(f"Write a Burmese {type} script about {topic}. Tone: {tone}. {prompt}").text
 
-def script_audio(text, config):
+def script_audio_gen(text, conf):
     clean = clean_burmese(text)
     chunks = [clean[i:i+500] for i in range(0, len(clean), 500)]
     comb = AudioSegment.empty()
     for i, c in enumerate(chunks):
         f = f"c_{i}.mp3"
-        if generate_audio(c, config, f):
+        if generate_audio(c, conf, f):
             comb += AudioSegment.from_file(f)
             os.remove(f)
     out = f"script_{int(time.time())}.mp3"
@@ -244,7 +230,7 @@ def script_audio(text, config):
     return out
 
 # ---------------------------------------------------------
-# 🖥️ UI
+# 🖥️ MAIN UI
 # ---------------------------------------------------------
 with st.sidebar:
     st.title("🇲🇲 AI Studio Pro")
@@ -252,8 +238,12 @@ with st.sidebar:
     if api_key: st.session_state.api_key = api_key
     st.divider()
     
-    mode = st.radio("Model", ["Preset", "Custom"])
-    model_name = st.selectbox("Select", ["gemini-1.5-flash", "gemini-2.0-flash-exp"]) if mode == "Preset" else st.text_input("Model ID", "gemini-2.5-flash")
+    # Custom Model Selection
+    mode = st.radio("Model", ["Preset", "Custom Input"])
+    if mode == "Preset":
+        model_name = st.selectbox("Select", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
+    else:
+        model_name = st.text_input("Model ID", "gemini-2.5-flash")
     
     if st.button("🔴 Reset"):
         st.session_state.processed_video = None
@@ -274,25 +264,25 @@ with t1:
     with c2: tone = st.selectbox("Tone", ["Normal", "Movie Recap", "News", "Deep"])
     with c3: 
         mix_bg = st.checkbox("Mix Original Audio?", value=True)
-        bg_vol = st.slider("BG Volume", 0, 50, 10) if mix_bg else 0
+        bg_vol = st.slider("BG Vol", 0, 50, 10) if mix_bg else 0
 
     base = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
     if tone == "Movie Recap": conf = {"id": base, "rate": "+0%", "pitch": "-10Hz"}
     elif tone == "News": conf = {"id": base, "rate": "+10%", "pitch": "+0Hz"}
-    elif tone == "Deep": conf = {"id": base, "rate": "-5%", "pitch": "-15Hz"}
+    elif tone == "Deep": conf = {"id": base, "rate": "-5%", "pitch": "-20Hz"}
     else: conf = {"id": base, "rate": "+0%", "pitch": "+0Hz"}
 
     if st.button("🚀 Start Dubbing") and uploaded:
         st.session_state.processed_video = None
-        st = st.empty()
+        status_msg = st.empty() # Fixed Variable Name
         pg = st.progress(0)
         try:
-            out = process_video_dubbing("temp.mp4", conf, tone, mix_bg, bg_vol, st.session_state.api_key, model_name, st, pg)
+            out = process_video_pipeline("temp.mp4", conf, tone, mix_bg, bg_vol, st.session_state.api_key, model_name, status_msg, pg)
             if out:
                 st.session_state.processed_video = out
-                st.success("Done!")
+                status_msg.success("Done!")
                 st.rerun()
-        except Exception as e: st.error(str(e))
+        except Exception as e: status_msg.error(str(e))
 
     if st.session_state.processed_video:
         st.video(st.session_state.processed_video)
@@ -307,11 +297,10 @@ with t2:
         res = generate_script(topic, "Script", "Normal", pt, st.session_state.api_key, model_name)
         st.session_state.generated_script = res
         st.rerun()
-    
     if st.session_state.generated_script:
-        sc = st.text_area("Script", st.session_state.generated_script)
+        sc = st.text_area("Result", st.session_state.generated_script, height=300)
         if st.button("Read"):
-            f = script_audio(sc, conf)
+            f = script_audio_gen(sc, conf)
             st.audio(f)
 
 with t3: st.info("Viral Kit Ready")
