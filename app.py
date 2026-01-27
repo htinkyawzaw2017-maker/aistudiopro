@@ -1,9 +1,6 @@
 import warnings
 warnings.filterwarnings("ignore")
 import os
-os.environ["GRPC_VERBOSITY"] = "ERROR"
-os.environ["GLOG_minloglevel"] = "2"
-
 import streamlit as st
 import google.generativeai as genai
 import edge_tts
@@ -15,16 +12,7 @@ import shutil
 import whisper
 import re
 from pydub import AudioSegment
-from PIL import Image
-# 🔥 FIX ERROR: IMPORT EXCEPTIONS EXPLICITLY
 from google.api_core import exceptions
-
-# ---------------------------------------------------------
-# 💾 STATE MANAGEMENT
-# ---------------------------------------------------------
-if 'processed_video' not in st.session_state: st.session_state.processed_video = None
-if 'generated_script' not in st.session_state: st.session_state.generated_script = ""
-if 'api_key' not in st.session_state: st.session_state.api_key = ""
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -34,20 +22,28 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
     .stButton>button {
-        background: linear-gradient(90deg, #FF4B2B, #FF416C); 
-        color: white; border: none; height: 50px; font-weight: bold; width: 100%;
+        background: linear-gradient(90deg, #00C9FF, #92FE9D); 
+        color: black; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .status-box { padding: 15px; border-radius: 10px; margin-bottom: 10px; border: 1px solid #444; background: #222; }
+    .debug-box { font-family: monospace; font-size: 12px; color: #00ff00; background: #000; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
+    .error-box { font-family: monospace; font-size: 12px; color: #ff4b4b; background: #260000; padding: 10px; border-radius: 5px; }
     </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------
+# 💾 STATE
+# ---------------------------------------------------------
+if 'processed_video' not in st.session_state: st.session_state.processed_video = None
+if 'generated_script' not in st.session_state: st.session_state.generated_script = ""
+if 'api_key' not in st.session_state: st.session_state.api_key = ""
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
 def check_requirements():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please install FFmpeg."); st.stop()
+        st.error("❌ FFmpeg is missing. System cannot run."); st.stop()
 
 def get_duration(path):
     try:
@@ -57,35 +53,33 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (TONE & UNIT FIXER)
+# 🔊 ROBUST AUDIO ENGINE (LIBRARY BASED)
 # ---------------------------------------------------------
-async def tts_generation_async(text, voice, rate, pitch, output_file):
+async def tts_async(text, voice, rate, pitch, filename):
     communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-    await communicate.save(output_file)
+    await communicate.save(filename)
 
-def generate_audio(text, voice_config, filename):
-    # Unpack config
-    voice = voice_config['id']
-    rate = voice_config['rate']
-    pitch = voice_config['pitch']
-    
+def generate_audio_lib(text, voice_conf, filename):
     try:
-        # Create a fresh loop for thread safety in Streamlit
+        # Use fresh loop to avoid Streamlit conflicts
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(tts_generation_async(text, voice, rate, pitch, filename))
+        loop.run_until_complete(tts_async(text, voice_conf['id'], voice_conf['rate'], voice_conf['pitch'], filename))
         loop.close()
         
-        # Verify file creation
-        if os.path.exists(filename) and os.path.getsize(filename) > 0:
+        # Verify File
+        if os.path.exists(filename) and os.path.getsize(filename) > 100: # Check if > 100 bytes
             return True
         return False
     except Exception as e:
         print(f"TTS Error: {e}")
         return False
 
-def clean_text_for_burmese(text):
-    # 1. Unit & Number Fixer (Python-side enforcement)
+# ---------------------------------------------------------
+# 🛡️ SMART TEXT CLEANER (UNIT FIXER)
+# ---------------------------------------------------------
+def clean_burmese_text(text):
+    # 1. Unit Replacements (Pronunciation Fix)
     replacements = {
         "No.": "နံပါတ် ",
         "kg": " ကီလိုဂရမ် ",
@@ -94,35 +88,25 @@ def clean_text_for_burmese(text):
         "km": " ကီလိုမီတာ ",
         "%": " ရာခိုင်နှုန်း ",
         "$": " ဒေါ်လာ ",
-        "Mr.": "မစ္စတာ ",
-        "Ms.": "မစ္စ "
     }
-    # Case insensitive replacement
     for k, v in replacements.items():
-        pattern = re.compile(re.escape(k), re.IGNORECASE)
-        text = pattern.sub(v, text)
+        text = text.replace(k, v).replace(k.lower(), v)
 
-    # 2. English Killer (Remove A-Z but keep Burmese)
+    # 2. English Killer (Remove A-Z, Keep Burmese)
     cleaned = re.sub(r'[A-Za-z]', '', text)
     return cleaned.strip()
 
-# ---------------------------------------------------------
-# 🧠 SMART TRANSLATION
-# ---------------------------------------------------------
 def translate_content(model, text, style):
+    # Powerful Prompt
     prompt = f"""
-    Act as a professional Burmese Dubbing Artist.
-    Translate the following English text to Spoken Burmese (Myanmar).
-    
+    Act as a Burmese Dubbing Artist. Translate English to Burmese (Myanmar).
     Input: "{text}"
     
-    CRITICAL RULES:
+    RULES:
     1. **Output Burmese Only**: Do NOT output English words.
-    2. **Numbers**: Convert to Burmese words (e.g., 100 -> တစ်ရာ).
-    3. **Tone/Style**: {style}.
-       - If Movie Recap: Use dramatic, storytelling words.
-       - If Deep: Use serious, heavy words.
-    4. **No Explanations**: Just return the translated text.
+    2. **Numbers**: Convert to words (100 -> တစ်ရာ).
+    3. **Tone**: {style}.
+    4. **Direct Output**: No explanations.
     """
     
     retries = 3
@@ -130,8 +114,7 @@ def translate_content(model, text, style):
         try:
             response = model.generate_content(prompt)
             translated = response.text.strip()
-            # Clean and return
-            cleaned = clean_text_for_burmese(translated)
+            cleaned = clean_burmese_text(translated)
             if cleaned: return cleaned
         except exceptions.ResourceExhausted:
             time.sleep(5)
@@ -140,112 +123,119 @@ def translate_content(model, text, style):
     return ""
 
 # ---------------------------------------------------------
-# 🎬 MAIN VIDEO PIPELINE
+# 🎬 MAIN DEBUG PIPELINE
 # ---------------------------------------------------------
-def process_video_pipeline(video_path, voice_config, style_desc, api_key, model_name, status, progress):
+def process_video_debug(video_path, voice_conf, style, api_key, model_name, debug_area, progress):
     check_requirements()
+    debug_logs = []
     
+    def log(msg, type="info"):
+        debug_logs.append(msg)
+        if type=="info": debug_area.markdown(f"<div class='debug-box'>ℹ️ {msg}</div>", unsafe_allow_html=True)
+        else: debug_area.markdown(f"<div class='error-box'>❌ {msg}</div>", unsafe_allow_html=True)
+        print(msg)
+
     # 1. Extract Audio
-    status.info("🎧 Step 1: Extracting Audio...")
+    log("Step 1: Extracting Audio from Video...")
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+    if not os.path.exists("temp.wav"):
+        log("Error: temp.wav not created", "error"); return None
+
     # 2. Whisper
-    status.info("🧠 Step 2: Speech Recognition...")
+    log("Step 2: Whisper Transcription Started...")
     whisper_model = whisper.load_model("base")
     result = whisper_model.transcribe("temp.wav")
     segments = result['segments']
-    
+    log(f"Whisper Found {len(segments)} Segments.")
+
     # 3. AI Setup
     genai.configure(api_key=api_key)
     try: model = genai.GenerativeModel(model_name)
     except: model = genai.GenerativeModel("gemini-1.5-flash")
 
     # 4. Dubbing Loop
-    status.info(f"🎙️ Step 3: Dubbing {len(segments)} segments...")
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
     total = len(segments)
     
     for i, seg in enumerate(segments):
-        start = seg['start']
-        end = seg['end']
-        
-        # Rate Limit
-        time.sleep(1)
+        start, end = seg['start'], seg['end']
         
         # Translate
-        burmese_text = translate_content(model, seg['text'], style_desc)
+        log(f"--- Segment {i+1}/{total} ---")
+        burmese_text = translate_content(model, seg['text'], style)
         
         if burmese_text:
+            log(f"Translated: {burmese_text}")
             fname = f"seg_{i}.mp3"
-            success = generate_audio(burmese_text, voice_config, fname)
             
-            if success:
+            # Generate Audio
+            if generate_audio_lib(burmese_text, voice_conf, fname):
+                fsize = os.path.getsize(fname) / 1024
+                log(f"Audio Generated: {fsize:.2f} KB")
+                
+                # Sync & Stretch
                 seg_audio = AudioSegment.from_file(fname)
                 curr_dur = len(seg_audio) / 1000.0
                 target_dur = end - start
                 
                 if curr_dur > 0 and target_dur > 0:
-                    # Time Stretch (Sync)
                     speed = max(0.6, min(curr_dur / target_dur, 1.5))
                     subprocess.run(['ffmpeg', '-y', '-i', fname, '-filter:a', f"atempo={speed}", f"s_{i}.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     if os.path.exists(f"s_{i}.mp3"):
                         final_seg = AudioSegment.from_file(f"s_{i}.mp3")
                         final_audio = final_audio.overlay(final_seg, position=start * 1000)
+                        log("Audio Synced & Overlaid.")
                         try: os.remove(f"s_{i}.mp3")
                         except: pass
-                
                 try: os.remove(fname)
                 except: pass
+            else:
+                log("TTS Failed (No Audio Generated)", "error")
+        else:
+            log("Translation Empty (English Killer Active)", "error")
         
         progress.progress((i + 1) / total)
+        time.sleep(1) # Rate limit safety
 
-    status.info("🔊 Step 4: Mixing Audio...")
+    # 5. Export
+    log("Step 4: Exporting Final Audio Track...")
     final_audio.export("final_track.mp3", format="mp3")
     
-    # Check if audio generated correctly
-    if os.path.getsize("final_track.mp3") < 500:
-        st.error("⚠️ Audio generation failed (Empty file).")
+    if os.path.getsize("final_track.mp3") < 1000:
+        log("CRITICAL: Final Audio is too small/silent!", "error")
+        # Fallback to original audio if dubbing failed completely
         return None
 
-    status.info("🎬 Step 5: Finalizing Video...")
+    log("Step 5: Merging with Video...")
     output_filename = f"dubbed_{int(time.time())}.mp4"
+    # -map 0:v (video from file 0) -map 1:a (audio from file 1)
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-i', "final_track.mp3", '-c:v', 'copy', '-c:a', 'aac', '-map', '0:v:0', '-map', '1:a:0', output_filename], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
+    log("Process Complete!")
     return output_filename
 
 # ---------------------------------------------------------
-# 📝 SCRIPT WRITER & AUDIO CONVERTER
+# 📝 SCRIPT FUNCTIONS
 # ---------------------------------------------------------
 def generate_script(topic, type, tone, prompt, api_key, model_name):
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(model_name)
-    
-    p = f"""
-    Act as a Burmese Content Creator.
-    Write a '{type}' script about "{topic}".
-    Tone: {tone}.
-    User Instructions: {prompt}
-    
-    Output Language: Burmese (Myanmar).
-    """
+    p = f"Write a {type} script about '{topic}'. Tone: {tone}. Instructions: {prompt}. Language: Burmese."
     return model.generate_content(p).text
 
 def text_to_speech_script(text, v_conf):
-    clean = clean_text_for_burmese(text)
-    # Split text if too long (Edge-TTS limit approx 1000 chars)
+    clean = clean_burmese_text(text)
     chunks = [clean[i:i+500] for i in range(0, len(clean), 500)]
     combined = AudioSegment.empty()
-    
     for idx, chunk in enumerate(chunks):
         fname = f"chunk_{idx}.mp3"
-        if generate_audio(chunk, v_conf, fname):
+        if generate_audio_lib(chunk, v_conf, fname):
             combined += AudioSegment.from_file(fname)
             os.remove(fname)
-            
-    out_path = f"script_{int(time.time())}.mp3"
-    combined.export(out_path, format="mp3")
-    return out_path
+    out = f"script_{int(time.time())}.mp3"
+    combined.export(out, format="mp3")
+    return out
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
@@ -257,127 +247,74 @@ with st.sidebar:
     
     st.divider()
     
-    # 🔥 CUSTOM MODEL SELECTION
+    # 🔥 CUSTOM MODEL BUTTON
     model_mode = st.radio("Model Settings", ["Preset", "Custom Input"])
     if model_mode == "Preset":
         model_name = st.selectbox("Select Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
     else:
         model_name = st.text_input("Enter Custom Model ID", value="gemini-2.5-flash")
     
-    st.caption(f"Active Model: {model_name}")
+    st.caption(f"Active: {model_name}")
     
-    if st.button("🔴 Force Reset"):
+    if st.button("🔴 Reset App"):
         st.session_state.processed_video = None
         st.rerun()
 
-if not st.session_state.api_key:
-    st.warning("Please enter API Key to proceed."); st.stop()
+if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
 # TABS
-t1, t2, t3, t4 = st.tabs(["🎙️ Dubbing", "📝 Script Writer", "🚀 Viral Kit", "🖼️ Thumbnail"])
+t1, t2, t3, t4 = st.tabs(["🎙️ Dubbing (Debug)", "📝 Script", "🚀 Viral", "🖼️ Thumbnail"])
 
-# --- TAB 1: DUBBING ---
+# TAB 1: DUBBING
 with t1:
-    st.subheader("🔊 Video Dubbing Engine")
+    st.subheader("🔊 Video Dubbing")
     uploaded_file = st.file_uploader("Upload Video", type=['mp4', 'mov'])
     
     if uploaded_file:
         with open("temp.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
 
     c1, c2, c3 = st.columns(3)
-    with c1: narrator = st.selectbox("Narrator", ["Male (Thiha)", "Female (Nilar)"])
-    with c2: 
-        tone = st.selectbox("Tone / Style", [
-            "Normal", 
-            "Movie Recap (Dramatic)", 
-            "News (Formal)", 
-            "Deep (Serious)", 
-            "Calming (Soft)", 
-            "Fast (Excited)"
-        ])
+    with c1: narrator = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
+    with c2: tone = st.selectbox("Style", ["Normal", "Movie Recap", "News", "Deep", "Calming", "Fast"])
     
-    # 🔥 PRECISE TONE CONFIGURATION
+    # Tone Config
     base_id = "my-MM-ThihaNeural" if "Male" in narrator else "my-MM-NilarNeural"
+    if tone == "Movie Recap": v_conf = {"id": base_id, "rate": "+0%", "pitch": "-10Hz"}
+    elif tone == "News": v_conf = {"id": base_id, "rate": "+10%", "pitch": "+0Hz"}
+    elif tone == "Deep": v_conf = {"id": base_id, "rate": "-5%", "pitch": "-20Hz"}
+    elif tone == "Calming": v_conf = {"id": base_id, "rate": "-5%", "pitch": "+5Hz"}
+    elif tone == "Fast": v_conf = {"id": base_id, "rate": "+25%", "pitch": "+10Hz"}
+    else: v_conf = {"id": base_id, "rate": "+0%", "pitch": "+0Hz"}
     
-    if tone == "Movie Recap (Dramatic)":
-        v_conf = {"id": base_id, "rate": "+0%", "pitch": "-10Hz"}
-        style_prompt = "Dramatic, Storytelling"
-    elif tone == "News (Formal)":
-        v_conf = {"id": base_id, "rate": "+10%", "pitch": "+0Hz"}
-        style_prompt = "Formal, News Reporter"
-    elif tone == "Deep (Serious)":
-        v_conf = {"id": base_id, "rate": "-5%", "pitch": "-20Hz"}
-        style_prompt = "Serious, Deep voice"
-    elif tone == "Calming (Soft)":
-        v_conf = {"id": base_id, "rate": "-5%", "pitch": "+5Hz"}
-        style_prompt = "Soft, Gentle"
-    elif tone == "Fast (Excited)":
-        v_conf = {"id": base_id, "rate": "+25%", "pitch": "+10Hz"}
-        style_prompt = "Excited, Fast"
-    else:
-        v_conf = {"id": base_id, "rate": "+0%", "pitch": "+0Hz"}
-        style_prompt = "Natural Conversation"
-
-    if uploaded_file and st.button("🚀 Start Dubbing"):
+    if st.button("🚀 Start Dubbing (Debug Mode)"):
         st.session_state.processed_video = None
-        status = st.empty()
+        debug_area = st.empty() # Area for logs
         prog = st.progress(0)
+        
         try:
-            out = process_video_pipeline("temp.mp4", v_conf, style_prompt, st.session_state.api_key, model_name, status, prog)
+            out = process_video_debug("temp.mp4", v_conf, tone, st.session_state.api_key, model_name, debug_area, prog)
             if out:
                 st.session_state.processed_video = out
-                status.success("Dubbing Complete!")
+                st.success("✅ Dubbing Complete!")
                 st.rerun()
         except Exception as e:
-            status.error(f"Error: {e}")
-            
+            st.error(f"Critical Error: {e}")
+
     if st.session_state.processed_video:
         st.video(st.session_state.processed_video)
         with open(st.session_state.processed_video, "rb") as f:
-            st.download_button("Download Dubbed Video", f, "dubbed.mp4")
+            st.download_button("Download", f, "dubbed.mp4")
 
-# --- TAB 2: SCRIPT WRITER ---
+# TAB 2: SCRIPT
 with t2:
-    st.subheader("📝 Script & Voiceover")
+    st.subheader("📝 Script Writer")
+    sc1, sc2 = st.columns(2)
+    with sc1: s_type = st.selectbox("Type", ["Story", "Movie Script", "Voiceover"])
+    with sc2: s_tone = st.selectbox("Tone", ["Emotional", "Serious", "Funny"])
+    topic = st.text_input("Topic")
+    prompt = st.text_area("Instructions")
     
-    col1, col2 = st.columns(2)
-    with col1: s_type = st.selectbox("Script Type", ["Story", "Movie Script", "Video Voiceover", "Documentary"])
-    with col2: s_tone = st.selectbox("Script Tone", ["Emotional", "Serious", "Funny", "Educational"])
-    
-    topic = st.text_input("Topic (e.g., History of Bagan)")
-    user_prompt = st.text_area("Specific Instructions (User Prompt)", placeholder="Start with a hook, mention specific dates...")
-    
-    if st.button("✍️ Generate Script"):
-        if not topic: st.warning("Please enter a topic.")
-        else:
-            with st.spinner("Writing..."):
-                res = generate_script(topic, s_type, s_tone, user_prompt, st.session_state.api_key, model_name)
-                st.session_state.generated_script = res
-                st.rerun()
-                
-    if st.session_state.generated_script:
-        st.markdown("### Generated Script")
-        final_script = st.text_area("Edit Script:", st.session_state.generated_script, height=300)
-        
-        st.markdown("### 🔊 Convert Script to Audio")
-        ac1, ac2 = st.columns(2)
-        with ac1: a_voice = st.selectbox("Voice", ["Male", "Female"], key="av")
-        with ac2: a_tone = st.selectbox("Audio Tone", ["Normal", "Deep", "News"], key="at")
-        
-        # Audio Config for Script
-        s_id = "my-MM-ThihaNeural" if "Male" in a_voice else "my-MM-NilarNeural"
-        if a_tone == "Deep": s_conf = {"id": s_id, "rate": "-5%", "pitch": "-15Hz"}
-        elif a_tone == "News": s_conf = {"id": s_id, "rate": "+10%", "pitch": "+0Hz"}
-        else: s_conf = {"id": s_id, "rate": "+0%", "pitch": "+0Hz"}
-        
-        if st.button("🗣️ Read Script"):
-            with st.spinner("Generating Audio..."):
-                a_file = text_to_speech_script(final_script, s_conf)
-                st.audio(a_file)
-                with open(a_file, "rb") as f:
-                    st.download_button("Download Audio (MP3)", f, "script.mp3")
-
-# --- TAB 3 & 4 (Viral & Thumbnail) ---
-# Keeping placeholders simple as requested logic is similar
-with t3: st.info("Viral Kit integrated with AI model.")
-with t4: st.info("Thumbnail Analyzer integrated with AI model.")
+    if st.button("✍️ Write"):
+        with st.spinner("Writing..."):
+            res = generate_script(topic, s_type, s_tone, prompt, st.session_state.api_key, model_name)
+            st.session_state.generated_script = res
