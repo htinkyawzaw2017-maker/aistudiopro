@@ -25,13 +25,11 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
     .stButton>button {
-        background: linear-gradient(90deg, #FF4B2B, #FF416C); 
-        color: white; border: none; height: 50px; font-weight: bold; width: 100%;
+        background: linear-gradient(90deg, #00C9FF, #92FE9D); 
+        color: black; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .log-success { color: #4CAF50; font-family: monospace; }
-    .log-warning { color: #FFC107; font-family: monospace; }
-    .log-error { color: #F44336; font-family: monospace; }
+    .eng-text { color: #888; font-size: 12px; font-style: italic; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -74,48 +72,34 @@ def generate_audio_cli(text, voice, rate, pitch, output_file):
     except: return False
 
 # ---------------------------------------------------------
-# 🛡️ INPUT SANITIZER (The Fix for Blocking)
+# 🛡️ EDUCATIONAL TRANSLATION ENGINE
 # ---------------------------------------------------------
-def sanitize_input_text(text):
-    # Dictionary of trigger words to safe synonyms
-    triggers = {
-        "kill": "eliminate", "murder": "defeat", "blood": "red fluid",
-        "hunt": "chase", "die": "fall", "dead": "gone",
-        "shoot": "hit", "gun": "tool", "weapon": "device",
-        "corpse": "body", "violence": "conflict", "attack": "engage",
-        "terror": "fear", "bomb": "device", "explosion": "blast",
-        "suicide": "give up", "torture": "hurt"
-    }
-    
-    # Replace words (Case insensitive)
-    text_lower = text.lower()
-    for k, v in triggers.items():
-        if k in text_lower:
-            pattern = re.compile(re.escape(k), re.IGNORECASE)
-            text = pattern.sub(v, text)
-            
-    return text
-
 def clean_burmese(text):
-    # Fix Units
     replacements = {"No.": "နံပါတ် ", "kg": " ကီလို ", "cm": " စင်တီမီတာ ", "$": " ဒေါ်လာ "}
     for k, v in replacements.items():
         text = re.sub(re.escape(k), v, text, flags=re.IGNORECASE)
     cleaned = re.sub(r'[A-Za-z]', '', text)
     return cleaned.strip()
 
-def translate_persistent(model, text, style):
-    # Step 1: Sanitize Input (Trick the AI)
-    safe_text = sanitize_input_text(text)
-    
+def translate_educational(model, text, style):
+    # Skip noise
+    if len(text.strip()) < 2 or text.strip() in ["[Music]", "[Applause]", "[Silence]"]:
+        return "", "Skipped Noise"
+
+    # STRATEGY: EDUCATIONAL CONTEXT (Better for Motivation)
     prompt = f"""
-    Task: Translate this movie script to Burmese.
-    Input: "{safe_text}"
-    Style: {style}
-    Rules: Burmese ONLY.
+    Role: Professional Linguistic Translator.
+    Task: Translate this motivational/educational text to Burmese (Myanmar) for a database.
+    
+    Source Text: "{text}"
+    
+    Instruction: 
+    1. Translate the meaning accurately. 
+    2. If there are metaphors (e.g., 'kill the boy'), translate the *meaning* (e.g., 'destroy the weakness'), do not be literal if it sounds violent.
+    3. Tone: {style}.
+    4. Output: Burmese ONLY.
     """
     
-    # Force minimal safety
     safety = [
         { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE" },
         { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE" },
@@ -131,10 +115,8 @@ def translate_persistent(model, text, style):
                 if clean: return clean, "Success"
         except Exception:
             time.sleep(1)
-    
-    # Final Fallback if still blocked: Return a generic filler
-    # This prevents silence gaps
-    return "ဆက်လက်ကြည့်ရှုပေးပါ။", "Fallback"
+            
+    return "ဆက်လက်ကြိုးစားပါ။", "Fallback" # Generic motivational filler
 
 # ---------------------------------------------------------
 # 🎬 MAIN PROCESS
@@ -143,7 +125,6 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
     check_requirements()
     genai.configure(api_key=api_key)
     
-    # Force 1.5 Flash if custom fails (It is more lenient)
     try:
         model = genai.GenerativeModel(model_name)
     except:
@@ -163,11 +144,14 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
     status.info(f"🎙️ Dubbing {len(segments)} segments...")
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
     
-    log_box = st.expander("Translation Logs", expanded=True)
+    log_box = st.expander("📝 Live Translation Logs", expanded=True)
+    
+    success_cnt = 0
     
     for i, seg in enumerate(segments):
         start = seg['start']
         end = seg['end']
+        eng_text = seg['text']
         
         # Calculate strict time slot
         if i < len(segments) - 1:
@@ -175,19 +159,23 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
         else:
             max_dur = end - start + 2.0
             
-        # Translate with Sanitization
-        text, status_msg = translate_persistent(model, seg['text'], style)
+        # Translate
+        burmese, status_msg = translate_educational(model, eng_text, style)
         
-        # LOGGING
+        # LOGGING (With English Source)
         if status_msg == "Success":
-            with log_box: st.markdown(f"<span class='log-success'>✅ {i+1}: {text}</span>", unsafe_allow_html=True)
+            with log_box: 
+                st.markdown(f"**Seg {i+1}:** <span class='eng-text'>{eng_text}</span><br>✅ {burmese}", unsafe_allow_html=True)
+                st.divider()
+        elif status_msg == "Skipped Noise":
+            with log_box: st.write(f"🔇 Seg {i+1}: Noise Skipped")
         else:
-            with log_box: st.markdown(f"<span class='log-warning'>⚠️ {i+1}: Blocked -> Using Filler</span>", unsafe_allow_html=True)
+            with log_box: 
+                st.markdown(f"**Seg {i+1}:** <span class='eng-text'>{eng_text}</span><br>⚠️ Blocked -> Using Filler", unsafe_allow_html=True)
         
-        # Audio Generation (Even for fillers)
-        if text:
+        if burmese:
             raw = f"raw_{i}.mp3"
-            if generate_audio_cli(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], raw):
+            if generate_audio_cli(burmese, voice_config['id'], voice_config['rate'], voice_config['pitch'], raw):
                 curr_len = get_duration(raw)
                 if curr_len > 0:
                     speed = max(0.5, min(curr_len / max_dur, 1.8))
@@ -197,6 +185,7 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
                     if os.path.exists(proc):
                         seg_audio = AudioSegment.from_file(proc)
                         final_audio = final_audio.overlay(seg_audio, position=start * 1000)
+                        success_cnt += 1
                         try: os.remove(proc)
                         except: pass
                 try: os.remove(raw)
@@ -235,9 +224,10 @@ with st.sidebar:
     st.title("🇲🇲 AI Studio Pro")
     api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
-    
     st.divider()
-    model_name = st.text_input("Model ID", value="gemini-1.5-flash") # 1.5 Flash is safer for blocks
+    
+    st.subheader("🤖 Model")
+    model_name = st.text_input("Model ID", value="gemini-1.5-flash") # 1.5 is safer for motivation
     
     if st.button("🔴 Reset App"):
         st.session_state.processed_video = None
@@ -245,7 +235,7 @@ with st.sidebar:
 
 if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
-t1, t2 = st.tabs(["🎙️ Dubbing", "📝 Tools"])
+t1, t2 = st.tabs(["🎙️ Video Dubbing", "📝 Tools"])
 
 with t1:
     st.subheader("🔊 Video Dubbing")
