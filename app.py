@@ -29,8 +29,8 @@ st.markdown("""
         color: white; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .error-box { padding: 10px; background: #330000; border: 1px solid #ff0000; border-radius: 5px; color: #ffcccc; margin-bottom: 10px; }
-    .success-box { padding: 10px; background: #003300; border: 1px solid #00ff00; border-radius: 5px; color: #ccffcc; margin-bottom: 10px; }
+    .error-box { padding: 15px; background: #330000; border: 1px solid #ff0000; border-radius: 5px; color: #ffcccc; margin-bottom: 10px; }
+    .success-box { padding: 15px; background: #003300; border: 1px solid #00ff00; border-radius: 5px; color: #ccffcc; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -45,7 +45,7 @@ if 'api_key' not in st.session_state: st.session_state.api_key = ""
 # ---------------------------------------------------------
 def check_requirements():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. System cannot process audio.")
+        st.error("❌ FFmpeg is missing. Please install FFmpeg.")
         st.stop()
 
 def get_duration(path):
@@ -56,30 +56,24 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (Native Library - Most Stable)
+# 🔊 AUDIO ENGINE (CLI - 100% STABLE)
 # ---------------------------------------------------------
-async def tts_gen(text, voice, rate, pitch, output_file):
-    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
-    await communicate.save(output_file)
-
-def generate_audio(text, voice_config, filename):
+def generate_audio_cli(text, voice, rate, pitch, output_file):
     try:
-        # Create new loop to avoid Cloud concurrency errors
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(tts_gen(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], filename))
-        loop.close()
-        
-        # Verify file
-        if os.path.exists(filename) and os.path.getsize(filename) > 100:
-            return True
-        return False
-    except Exception as e:
-        print(f"TTS Error: {e}")
-        return False
+        cmd = [
+            "edge-tts",
+            "--voice", voice,
+            "--text", text,
+            "--rate", rate,
+            "--pitch", pitch,
+            "--write-media", output_file
+        ]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return os.path.exists(output_file) and os.path.getsize(output_file) > 100
+    except: return False
 
 # ---------------------------------------------------------
-# 🛡️ TEXT CLEANER
+# 🛡️ SMART TRANSLATION (AUTO-RETRY & FALLBACK)
 # ---------------------------------------------------------
 def clean_burmese(text):
     # Fix Units
@@ -93,24 +87,29 @@ def clean_burmese(text):
     cleaned = re.sub(r'[A-Za-z]', '', text)
     return cleaned.strip()
 
-def translate_content(model, text, style):
+def translate_safe(model, text, style):
     prompt = f"""
     Translate English to spoken Burmese (Myanmar).
     Input: "{text}"
     Rules: 
     1. Burmese ONLY. No English words.
-    2. Convert numbers to words (e.g. 100 -> တစ်ရာ).
+    2. Convert numbers to words.
     3. Tone: {style}.
     """
-    for _ in range(2):
+    
+    # Retry Logic for Quota Limits
+    for attempt in range(3):
         try:
             res = model.generate_content(prompt)
             clean = clean_burmese(res.text.strip())
             if clean: return clean
+        except exceptions.ResourceExhausted:
+            time.sleep(5) # Wait 5s if Quota exceeded
+            continue
         except Exception as e:
-            print(f"Translation Error: {e}")
-            time.sleep(2)
-    return ""
+            print(f"Error: {e}")
+            
+    return "" # Return empty if failed
 
 # ---------------------------------------------------------
 # 🎬 MAIN PROCESS
@@ -118,14 +117,26 @@ def translate_content(model, text, style):
 def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_key, model_name, status, progress):
     check_requirements()
     
-    # 1. API Test
+    # 1. API & Model Check
     genai.configure(api_key=api_key)
+    
+    # 🔥 AUTO-FALLBACK LOGIC
+    active_model = None
     try:
-        model = genai.GenerativeModel(model_name)
-        model.generate_content("Test") # Quick test
-    except Exception as e:
-        status.markdown(f"<div class='error-box'>❌ API Error: {str(e)}<br>Please check your API Key or Model Name.</div>", unsafe_allow_html=True)
-        return None
+        # Try requested model
+        m = genai.GenerativeModel(model_name)
+        m.generate_content("Hi")
+        active_model = m
+    except:
+        # If failed (404/429), force fallback to 1.5-flash
+        status.warning(f"⚠️ Model '{model_name}' failed. Switching to 'gemini-1.5-flash'...")
+        try:
+            m = genai.GenerativeModel("gemini-1.5-flash")
+            m.generate_content("Hi")
+            active_model = m
+        except Exception as e:
+            status.error(f"❌ API Key Invalid or Quota Exceeded. Error: {e}")
+            return None
 
     # 2. Extract
     status.info("🎧 Step 1: Extracting Audio...")
@@ -141,8 +152,8 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
     status.info(f"🎙️ Step 3: Dubbing {len(segments)} segments...")
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
     
-    # Translation Log Container
-    log_box = st.expander("📝 Translation Logs (Live)", expanded=True)
+    # Translation Log
+    log_box = st.expander("📝 Live Translation Logs", expanded=True)
     
     success_count = 0
     
@@ -157,21 +168,23 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
             max_dur = end - start + 2.0
             
         # Translate
-        text = translate_content(model, seg['text'], style)
+        text = translate_safe(active_model, seg['text'], style)
         
-        # LOGGING (Crucial for debugging)
+        # LOGGING
         if text:
-            with log_box: st.write(f"✅ **Seg {i+1}:** {text}")
+            with log_box: st.write(f"✅ **{i+1}:** {text}")
         else:
-            with log_box: st.markdown(f":red[❌ **Seg {i+1} Failed:** AI returned empty.]")
+            with log_box: st.write(f"⚠️ **{i+1}:** [Translation Skipped]")
         
         if text:
             raw = f"raw_{i}.mp3"
-            if generate_audio(text, voice_config, raw):
-                # Simple stretch to fit time (Prevents overlap)
+            # 🔥 USE CLI GENERATOR
+            if generate_audio_cli(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], raw):
+                
+                # Fit to time
                 curr_len = get_duration(raw)
                 if curr_len > 0:
-                    speed = max(0.5, min(curr_len / max_dur, 1.8)) # Limit speed
+                    speed = max(0.5, min(curr_len / max_dur, 1.8))
                     proc = f"proc_{i}.mp3"
                     
                     subprocess.run(['ffmpeg', '-y', '-i', raw, '-filter:a', f"atempo={speed}", proc], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -185,11 +198,11 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
                 try: os.remove(raw)
                 except: pass
         
-        time.sleep(1) # Rate limit protection
+        time.sleep(1) # Safety pause for API
         progress.progress((i + 1) / len(segments))
 
     if success_count == 0:
-        status.error("❌ No audio was generated. Please use 'gemini-1.5-flash' model.")
+        status.error("❌ No audio generated. Ensure your API Key works for 'gemini-1.5-flash'.")
         return None
 
     # 5. Final Mix
@@ -199,7 +212,6 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
     
     if mix_bg:
         vol = bg_vol / 100.0
-        # Ducking: Original audio lowered, Voice boosted
         cmd = [
             'ffmpeg', '-y', '-i', video_path, '-i', 'voice.mp3',
             '-filter_complex', f'[0:a]volume={vol}[bg];[1:a]volume=1.5[fg];[bg][fg]amix=inputs=2:duration=first[aout]',
@@ -207,7 +219,6 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
             '-c:v', 'copy', '-c:a', 'aac', output_file
         ]
     else:
-        # Replace Audio
         cmd = [
             'ffmpeg', '-y', '-i', video_path, '-i', 'voice.mp3',
             '-map', '0:v', '-map', '1:a',
@@ -226,10 +237,24 @@ with st.sidebar:
     if api_key: st.session_state.api_key = api_key
     
     st.divider()
-    # 🔥 FORCED MODEL SELECTION (To prevent errors)
+    
+    # 🔥 MODEL CHECKER BUTTON
+    if st.button("🔌 Test Connection"):
+        if not api_key:
+            st.error("Enter Key First!")
+        else:
+            genai.configure(api_key=api_key)
+            try:
+                m = genai.GenerativeModel("gemini-1.5-flash")
+                res = m.generate_content("Hello")
+                st.success(f"✅ Connection Success! (gemini-1.5-flash)")
+            except Exception as e:
+                st.error(f"❌ Connection Failed: {e}")
+
+    # Model Settings (Simplified)
     st.markdown("### 🤖 Model Settings")
     model_name = st.selectbox("Select Model", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"])
-    st.caption("⚠️ Use 'gemini-1.5-flash' for best results.")
+    st.caption("✅ Recommended: gemini-1.5-flash")
     
     if st.button("🔴 Reset App"):
         st.session_state.processed_video = None
@@ -281,4 +306,4 @@ with t1:
             st.download_button("💾 Download Video", f, "dubbed.mp4")
 
 with t2:
-    st.info("Additional tools available in next update.")
+    st.info("Additional tools (Script/Viral) can be added here.")
