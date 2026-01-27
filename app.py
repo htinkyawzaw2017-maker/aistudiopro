@@ -1,13 +1,8 @@
 import warnings
 warnings.filterwarnings("ignore")
 import os
-os.environ["GRPC_VERBOSITY"] = "ERROR"
-os.environ["GLOG_minloglevel"] = "2"
-
 import streamlit as st
 import google.generativeai as genai
-import edge_tts
-import asyncio
 import subprocess
 import json
 import time
@@ -29,8 +24,8 @@ st.markdown("""
         color: white; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .error-box { padding: 15px; background: #330000; border: 1px solid #ff0000; border-radius: 5px; color: #ffcccc; margin-bottom: 10px; }
-    .success-box { padding: 15px; background: #003300; border: 1px solid #00ff00; border-radius: 5px; color: #ccffcc; margin-bottom: 10px; }
+    .success-box { padding: 10px; background: #004400; border: 1px solid #00ff00; border-radius: 5px; margin-bottom: 10px; }
+    .error-box { padding: 10px; background: #440000; border: 1px solid #ff0000; border-radius: 5px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -68,12 +63,19 @@ def generate_audio_cli(text, voice, rate, pitch, output_file):
             "--pitch", pitch,
             "--write-media", output_file
         ]
+        # Run process
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return os.path.exists(output_file) and os.path.getsize(output_file) > 100
-    except: return False
+        
+        # Check if file exists and has size
+        if os.path.exists(output_file) and os.path.getsize(output_file) > 100:
+            return True
+        else:
+            return False
+    except:
+        return False
 
 # ---------------------------------------------------------
-# 🛡️ SMART TRANSLATION (AUTO-RETRY & FALLBACK)
+# 🛡️ SMART TRANSLATION
 # ---------------------------------------------------------
 def clean_burmese(text):
     # Fix Units
@@ -83,33 +85,44 @@ def clean_burmese(text):
     }
     for k, v in replacements.items():
         text = re.sub(re.escape(k), v, text, flags=re.IGNORECASE)
-    # Remove English characters (A-Z)
+    # Remove English (A-Z)
     cleaned = re.sub(r'[A-Za-z]', '', text)
     return cleaned.strip()
 
 def translate_safe(model, text, style):
     prompt = f"""
-    Translate English to spoken Burmese (Myanmar).
+    Translate English to spoken Burmese.
     Input: "{text}"
-    Rules: 
-    1. Burmese ONLY. No English words.
-    2. Convert numbers to words.
-    3. Tone: {style}.
+    Rules: Burmese ONLY. No English. Numbers to words. Tone: {style}.
     """
-    
-    # Retry Logic for Quota Limits
-    for attempt in range(3):
+    for _ in range(3):
         try:
             res = model.generate_content(prompt)
             clean = clean_burmese(res.text.strip())
             if clean: return clean
         except exceptions.ResourceExhausted:
-            time.sleep(5) # Wait 5s if Quota exceeded
+            time.sleep(5) # Wait if limit hit
             continue
-        except Exception as e:
-            print(f"Error: {e}")
-            
-    return "" # Return empty if failed
+        except Exception:
+            time.sleep(1)
+            continue
+    return ""
+
+# ---------------------------------------------------------
+# 🧪 API TESTER
+# ---------------------------------------------------------
+def test_api_connection(api_key, model_name):
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content("Test connection")
+        return True, "Connection Successful!"
+    except exceptions.NotFound:
+        return False, f"Model '{model_name}' not found (404). Check spelling."
+    except exceptions.ResourceExhausted:
+        return False, f"Quota Exceeded (429). Try 'gemini-1.5-flash'."
+    except Exception as e:
+        return False, f"Error: {str(e)}"
 
 # ---------------------------------------------------------
 # 🎬 MAIN PROCESS
@@ -117,43 +130,30 @@ def translate_safe(model, text, style):
 def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_key, model_name, status, progress):
     check_requirements()
     
-    # 1. API & Model Check
-    genai.configure(api_key=api_key)
-    
-    # 🔥 AUTO-FALLBACK LOGIC
-    active_model = None
-    try:
-        # Try requested model
-        m = genai.GenerativeModel(model_name)
-        m.generate_content("Hi")
-        active_model = m
-    except:
-        # If failed (404/429), force fallback to 1.5-flash
-        status.warning(f"⚠️ Model '{model_name}' failed. Switching to 'gemini-1.5-flash'...")
-        try:
-            m = genai.GenerativeModel("gemini-1.5-flash")
-            m.generate_content("Hi")
-            active_model = m
-        except Exception as e:
-            status.error(f"❌ API Key Invalid or Quota Exceeded. Error: {e}")
-            return None
+    # 1. API Check
+    status.info(f"🔌 Connecting to {model_name}...")
+    is_valid, msg = test_api_connection(api_key, model_name)
+    if not is_valid:
+        status.markdown(f"<div class='error-box'>❌ API Error: {msg}</div>", unsafe_allow_html=True)
+        return None
 
     # 2. Extract
-    status.info("🎧 Step 1: Extracting Audio...")
+    status.info("🎧 Extracting Audio...")
     subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     # 3. Whisper
-    status.info("🧠 Step 2: Speech Recognition...")
+    status.info("🧠 Transcribing...")
     whisper_model = whisper.load_model("base")
     result = whisper_model.transcribe("temp.wav")
     segments = result['segments']
     
     # 4. Dubbing Loop
-    status.info(f"🎙️ Step 3: Dubbing {len(segments)} segments...")
+    status.info(f"🎙️ Dubbing {len(segments)} segments...")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+
     final_audio = AudioSegment.silent(duration=get_duration(video_path) * 1000)
-    
-    # Translation Log
-    log_box = st.expander("📝 Live Translation Logs", expanded=True)
+    log_box = st.expander("📝 Translation Logs", expanded=True)
     
     success_count = 0
     
@@ -168,22 +168,17 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
             max_dur = end - start + 2.0
             
         # Translate
-        text = translate_safe(active_model, seg['text'], style)
-        
-        # LOGGING
-        if text:
-            with log_box: st.write(f"✅ **{i+1}:** {text}")
-        else:
-            with log_box: st.write(f"⚠️ **{i+1}:** [Translation Skipped]")
+        text = translate_safe(model, seg['text'], style)
         
         if text:
+            with log_box: st.write(f"✅ {i+1}: {text}")
             raw = f"raw_{i}.mp3"
-            # 🔥 USE CLI GENERATOR
+            
+            # Generate Audio
             if generate_audio_cli(text, voice_config['id'], voice_config['rate'], voice_config['pitch'], raw):
-                
-                # Fit to time
                 curr_len = get_duration(raw)
                 if curr_len > 0:
+                    # Smart Speed (Fit to slot)
                     speed = max(0.5, min(curr_len / max_dur, 1.8))
                     proc = f"proc_{i}.mp3"
                     
@@ -197,16 +192,18 @@ def process_video_dubbing(video_path, voice_config, style, mix_bg, bg_vol, api_k
                         except: pass
                 try: os.remove(raw)
                 except: pass
+        else:
+            with log_box: st.write(f"⚠️ {i+1}: Failed to translate")
         
-        time.sleep(1) # Safety pause for API
+        time.sleep(1) # Safety delay
         progress.progress((i + 1) / len(segments))
 
     if success_count == 0:
-        status.error("❌ No audio generated. Ensure your API Key works for 'gemini-1.5-flash'.")
+        status.error("❌ Audio generation failed completely.")
         return None
 
-    # 5. Final Mix
-    status.info("🔊 Step 4: Mixing...")
+    # 5. Mix
+    status.info("🔊 Mixing...")
     final_audio.export("voice.mp3", format="mp3")
     output_file = f"dubbed_{int(time.time())}.mp4"
     
@@ -238,33 +235,41 @@ with st.sidebar:
     
     st.divider()
     
-    # 🔥 MODEL CHECKER BUTTON
-    if st.button("🔌 Test Connection"):
-        if not api_key:
-            st.error("Enter Key First!")
-        else:
-            genai.configure(api_key=api_key)
-            try:
-                m = genai.GenerativeModel("gemini-1.5-flash")
-                res = m.generate_content("Hello")
-                st.success(f"✅ Connection Success! (gemini-1.5-flash)")
-            except Exception as e:
-                st.error(f"❌ Connection Failed: {e}")
-
-    # Model Settings (Simplified)
+    # 🔥 MODEL SELECTION (Research-Based)
     st.markdown("### 🤖 Model Settings")
-    model_name = st.selectbox("Select Model", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"])
-    st.caption("✅ Recommended: gemini-1.5-flash")
+    model_mode = st.radio("Select Type", ["Free Tier (Recommended)", "Custom Input"])
     
+    if model_mode == "Free Tier (Recommended)":
+        model_name = st.selectbox(
+            "Choose Model", 
+            ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-exp"]
+        )
+        st.caption("✅ 'gemini-1.5-flash' is the most stable.")
+    else:
+        model_name = st.text_input("Enter Model ID", value="gemini-2.5-flash")
+        st.caption("⚠️ Warning: 'gemini-2.5' does not exist yet. Use at own risk.")
+
+    # 🔌 API TESTER BUTTON
+    if st.button("🔌 Test API Connection"):
+        if not api_key:
+            st.error("Please enter API Key!")
+        else:
+            with st.spinner("Testing..."):
+                valid, msg = test_api_connection(api_key, model_name)
+                if valid:
+                    st.success(f"✅ {msg}")
+                else:
+                    st.error(f"❌ {msg}")
+
     if st.button("🔴 Reset App"):
         st.session_state.processed_video = None
         st.rerun()
 
 if not st.session_state.api_key:
-    st.warning("🔑 Please enter your API Key first.")
+    st.warning("🔑 Please enter API Key")
     st.stop()
 
-# TABS
+# MAIN TABS
 t1, t2 = st.tabs(["🎙️ Video Dubbing", "📝 Tools"])
 
 with t1:
@@ -275,12 +280,11 @@ with t1:
         
     c1, c2, c3 = st.columns(3)
     with c1: voice = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
-    with c2: tone = st.selectbox("Style", ["Normal", "Movie Recap", "News", "Deep"])
+    with c2: tone = st.selectbox("Tone", ["Normal", "Movie Recap", "News", "Deep"])
     with c3: 
         mix_bg = st.checkbox("Mix Original?", value=True)
         bg_vol = st.slider("BG Vol", 0, 50, 10) if mix_bg else 0
 
-    # Config
     base = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
     if tone == "Movie Recap": conf = {"id": base, "rate": "+0%", "pitch": "-10Hz"}
     elif tone == "News": conf = {"id": base, "rate": "+10%", "pitch": "+0Hz"}
@@ -291,19 +295,25 @@ with t1:
         st.session_state.processed_video = None
         status_msg = st.empty()
         pg = st.progress(0)
-        try:
-            out = process_video_dubbing("temp.mp4", conf, tone, mix_bg, bg_vol, st.session_state.api_key, model_name, status_msg, pg)
-            if out:
-                st.session_state.processed_video = out
-                status_msg.success("✅ Dubbing Complete!")
-                st.rerun()
-        except Exception as e:
-            status_msg.error(f"System Error: {e}")
+        
+        # FINAL API CHECK
+        valid, msg = test_api_connection(st.session_state.api_key, model_name)
+        if not valid:
+            status_msg.error(msg)
+        else:
+            try:
+                out = process_video_dubbing("temp.mp4", conf, tone, mix_bg, bg_vol, st.session_state.api_key, model_name, status_msg, pg)
+                if out:
+                    st.session_state.processed_video = out
+                    status_msg.success("✅ Done!")
+                    st.rerun()
+            except Exception as e:
+                status_msg.error(f"Error: {e}")
 
     if st.session_state.processed_video:
         st.video(st.session_state.processed_video)
         with open(st.session_state.processed_video, "rb") as f:
-            st.download_button("💾 Download Video", f, "dubbed.mp4")
+            st.download_button("💾 Download", f, "dubbed.mp4")
 
 with t2:
-    st.info("Additional tools (Script/Viral) can be added here.")
+    st.info("Additional tools available in full version.")
