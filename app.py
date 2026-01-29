@@ -15,6 +15,7 @@ from pydub import AudioSegment
 import time
 import json
 import re
+from google.api_core import exceptions
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -29,7 +30,7 @@ st.markdown("""
         border-radius: 10px; font-size: 16px;
     }
     textarea { font-size: 1.1rem !important; }
-    .viral-box { background: #111; padding: 15px; border-left: 4px solid #00ff00; }
+    .viral-box { background: #111; padding: 15px; border-left: 4px solid #00ff00; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,7 +48,7 @@ if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 # ---------------------------------------------------------
 def check_requirements():
     if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing.")
+        st.error("❌ FFmpeg is missing. Please install FFmpeg.")
         st.stop()
 
 def get_duration(path):
@@ -58,7 +59,7 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE
+# 🔊 AUDIO ENGINE (CLI)
 # ---------------------------------------------------------
 def generate_audio_cli(text, voice, rate, pitch, output_file):
     try:
@@ -75,7 +76,7 @@ def generate_audio_cli(text, voice, rate, pitch, output_file):
     except: return False
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (PROMPT ENGINEERED)
+# 🧠 AI ENGINE (H-V-C & Viral Kit)
 # ---------------------------------------------------------
 def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
@@ -87,74 +88,68 @@ def get_model(api_key, model_name):
     ]
     return genai.GenerativeModel(model_name, safety_settings=safety_settings)
 
-def generate_rewrite(model, text, style, custom_prompt):
+def transcribe_video(video_path):
+    try:
+        model = whisper.load_model("base")
+        result = model.transcribe(video_path)
+        return result['text']
+    except Exception as e:
+        return f"Error during transcription: {e}"
+
+def generate_hvc_script(model, title, text, style, custom_prompt):
     prompt = f"""
-    Act as a Master Storyteller.
-    Rewrite/Translate the following transcript into Burmese.
-    Input: "{text}"
-    
-    Structure (H-V-C):
-    1. Hook: Start with a strong, attention-grabbing opening sentence.
-    2. Value: Tell the story engagingly.
-    3. Call: End with a clear conclusion.
-    
+    Write a script outline for a video titled '{title}'.
+    Context: {text}
     Style: {style}
-    Instructions: {custom_prompt}
-    Rules: Burmese Only. No Censorship.
+    
+    Use the 'H-V-C' structure:
+    Hook (0-30s): A visual or verbal pattern interrupt to grab attention immediately.
+    Value (Body): 3 distinct value points, with a 're-engagement' moment every 60 seconds.
+    Call (End): A specific call to action related to this topic.
+    
+    Additional Instructions: {custom_prompt}
+    
+    CRITICAL: Translate the final output into spoken Burmese (Myanmar).
     """
     try: return model.generate_content(prompt).text
-    except: return "Error: AI Blocked."
+    except Exception as e: return f"AI Error: {e}"
 
 def generate_viral_metadata(model, title, keywords):
     prompt = f"""
-    Write a YouTube Video Description for '{title}' optimized for SEO.
-    
-    Keywords to include: {keywords}
-    
-    Structure:
-    1. **Hook Paragraph**: Natural, engaging, includes keywords.
-    2. **What You Will Learn**: Bullet points.
-    3. **Timestamps**: 5 key chapters (0:00 Intro, etc.).
-    4. **Tags**: 15 high-traffic tags, comma-separated.
-    
-    Language: English (for SEO) but with Burmese Context if implied.
+    Write a video description for '{title}' optimized for SEO.
+    Include:
+    1. A natural first paragraph incorporating keywords: {keywords}.
+    2. A bulleted list of what the viewer will learn.
+    3. Timestamps for 5 key chapters.
+    4. A list of 15 relevant, high-traffic tags separated by commas.
     """
     try: return model.generate_content(prompt).text
-    except: return "Error generating metadata."
+    except Exception as e: return f"AI Error: {e}"
 
 # ---------------------------------------------------------
-# ❄️ FREEZE FRAME ENGINE
+# ❄️ FREEZE FRAME ENGINE (FIXED)
 # ---------------------------------------------------------
 def process_freeze_command(command, input_video, output_video):
     """
-    Parses [freeze -3,6] -> Freezes at 3s for 6s duration.
-    Parses [duration 4,8] -> Extends timestamp 4s by 8s.
+    Parses [freeze 10,5] -> Freezes at 10s for 5s duration.
     """
     try:
-        # Extract numbers: [freeze -3,6] -> 3, 6
-        match = re.search(r'freeze\s*-?(\d+),(\d+)', command, re.IGNORECASE)
+        match = re.search(r'freeze\s*(\d+),(\d+)', command, re.IGNORECASE)
         if match:
-            time_point = float(match.group(1))
-            duration = float(match.group(2))
+            time_point = match.group(1)
+            duration = match.group(2)
             
-            # FFmpeg Filter: Split video, Trim, Loop the freeze frame, Concat
-            # This is complex, so we use a simpler pause approach:
-            # 1. Cut Part A (0 to time_point)
-            # 2. Cut Frame at time_point and loop it for duration
-            # 3. Cut Part B (time_point to end)
-            # 4. Concat A + Freeze + B
+            # 1. Cut Part A
+            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(time_point), '-c', 'copy', 'part_a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 1. Part A
-            subprocess.run(['ffmpeg', '-y', '-i', input_file, '-t', str(time_point), '-c', 'copy', 'part_a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # 2. Freeze
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_file, '-vframes', '1', 'freeze.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 2. Freeze Frame
+            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-vframes', '1', 'freeze.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'freeze.jpg', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'part_freeze.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 3. Part B
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_file, '-c', 'copy', 'part_b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # 3. Cut Part B
+            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-c', 'copy', 'part_b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 4. Concat (Need text file)
+            # 4. Concat
             with open("list.txt", "w") as f:
                 f.write("file 'part_a.mp4'\nfile 'part_freeze.mp4'\nfile 'part_b.mp4'")
             
@@ -167,7 +162,7 @@ def process_freeze_command(command, input_video, output_video):
             return True
         return False
     except Exception as e:
-        print(e)
+        print(f"Freeze Error: {e}")
         return False
 
 # ---------------------------------------------------------
@@ -194,34 +189,38 @@ with t1:
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
+        
         if st.button("📝 Extract Transcript"):
             with st.spinner("Processing..."):
                 check_requirements()
+                # Extract Audio
                 subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Transcribe
                 text = transcribe_video("temp.wav")
                 st.session_state.transcript = text
                 st.rerun()
 
     if st.session_state.transcript:
-        en_text = st.text_area("English", st.session_state.transcript, height=100)
+        en_text = st.text_area("English Transcript", st.session_state.transcript, height=100)
         c1, c2 = st.columns(2)
         with c1: style = st.selectbox("Style", ["Movie Recap", "News", "Funny"])
-        with c2: custom = st.text_input("Instructions", "H-V-C Structure")
+        with c2: custom = st.text_input("Extra Instructions", "Make it exciting")
         
-        if st.button("🤖 Generate Burmese"):
-            with st.spinner("Writing..."):
+        if st.button("🤖 Generate H-V-C Script"):
+            with st.spinner("Writing Script..."):
                 model = get_model(st.session_state.api_key, model_name)
-                res = generate_rewrite(model, en_text, style, custom)
+                # Using Video Filename as Title approximation or Generic
+                res = generate_hvc_script(model, "My Video", en_text, style, custom)
                 st.session_state.burmese_script = res
                 st.rerun()
 
     if st.session_state.burmese_script:
         st.subheader("Step 2: Edit & Freeze")
-        final_script = st.text_area("Burmese Script", st.session_state.burmese_script, height=200)
+        final_script = st.text_area("Burmese Script (H-V-C)", st.session_state.burmese_script, height=250)
         
-        # 🔥 FREEZE COMMAND INPUT
-        st.markdown("#### ❄️ Freeze / Duration Control")
-        st.caption("Example: `[freeze 10,5]` (Freeze at 10s for 5s) or Leave empty.")
+        # 🔥 FREEZE CONTROL
+        st.markdown("#### ❄️ Freeze Control")
+        st.caption("Example: `freeze 10,5` (Freeze at 10s for 5s)")
         freeze_cmd = st.text_input("Freeze Command (Optional)")
         
         vc1, vc2 = st.columns(2)
@@ -231,15 +230,15 @@ with t1:
             with st.spinner("Processing..."):
                 v_id = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
                 
-                # 1. Handle Freeze if needed
+                # 1. Handle Freeze
                 input_video_file = "input.mp4"
                 if freeze_cmd:
                     if process_freeze_command(freeze_cmd, "input.mp4", "frozen_input.mp4"):
                         input_video_file = "frozen_input.mp4"
-                        st.success(f"Video Frozen with command: {freeze_cmd}")
+                        st.success(f"Video Frozen with: {freeze_cmd}")
                 
                 # 2. Generate Audio
-                clean_text = final_script.replace("\n", " ").strip()
+                clean_text = final_script.replace("*", "").replace("#", "").strip() # Remove MD formatting
                 generate_audio_cli(clean_text, v_id, "+0%", "+0Hz", "base_voice.mp3")
                 st.session_state.audio_path = "base_voice.mp3"
                 
@@ -247,22 +246,16 @@ with t1:
                 vid_dur = get_duration(input_video_file)
                 aud_dur = get_duration("base_voice.mp3")
                 
+                # Auto-Speed logic to fit video
                 speed_factor = 1.0
                 if vid_dur > 0 and aud_dur > vid_dur:
                     speed_factor = aud_dur / vid_dur
-                    speed_factor = min(speed_factor, 1.5) # Cap at 1.5x
+                    speed_factor = min(speed_factor, 1.5) 
                 
-                # Process Audio Speed
                 subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={speed_factor}", "final_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Render
+                # Final Render
                 outfile = f"final_{int(time.time())}.mp4"
-                
-                # Video Speed Filter (Inverse of audio speed factor if we want to stretch video, but here we sped up audio)
-                # If audio was sped up, video stays normal.
-                # If we want to STRETCH video to match audio (Slow Motion):
-                # setpts = (Target/Original)*PTS
-                
                 cmd = [
                     'ffmpeg', '-y', '-i', input_video_file, '-i', "final_audio.mp3",
                     '-map', '0:v', '-map', '1:a',
@@ -270,6 +263,7 @@ with t1:
                 ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
+                st.success("✅ Video Ready!")
                 st.video(outfile)
                 with open(outfile, "rb") as f:
                     st.download_button("Download", f, "final.mp4")
