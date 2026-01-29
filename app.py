@@ -29,7 +29,7 @@ st.markdown("""
         color: white; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    textarea { font-size: 1.1rem !important; }
+    textarea { font-size: 1.1rem !important; font-family: 'Padauk', sans-serif !important; }
     .viral-box { background: #111; padding: 15px; border-left: 4px solid #00ff00; margin-top: 10px; }
     </style>
 """, unsafe_allow_html=True)
@@ -37,8 +37,9 @@ st.markdown("""
 # ---------------------------------------------------------
 # 💾 STATE
 # ---------------------------------------------------------
-if 'transcript' not in st.session_state: st.session_state.transcript = ""
-if 'burmese_script' not in st.session_state: st.session_state.burmese_script = ""
+if 'raw_transcript' not in st.session_state: st.session_state.raw_transcript = ""
+if 'burmese_draft' not in st.session_state: st.session_state.burmese_draft = ""
+if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'audio_path' not in st.session_state: st.session_state.audio_path = ""
 if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
@@ -76,7 +77,7 @@ def generate_audio_cli(text, voice, rate, pitch, output_file):
     except: return False
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (H-V-C & Viral Kit)
+# 🧠 AI ENGINE
 # ---------------------------------------------------------
 def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
@@ -88,28 +89,46 @@ def get_model(api_key, model_name):
     ]
     return genai.GenerativeModel(model_name, safety_settings=safety_settings)
 
-def transcribe_video(video_path):
+def transcribe_video(video_path, language_code=None):
     try:
         model = whisper.load_model("base")
-        result = model.transcribe(video_path)
+        # Whisper auto-detects, but we can hint if needed, though 'base' model is good at auto
+        result = model.transcribe(video_path) 
         return result['text']
     except Exception as e:
-        return f"Error during transcription: {e}"
+        return f"Error: {e}"
 
-def generate_hvc_script(model, title, text, style, custom_prompt):
+def translate_to_burmese_draft(model, text, source_lang):
     prompt = f"""
-    Write a script outline for a video titled '{title}'.
-    Context: {text}
-    Style: {style}
+    Task: Translate the following {source_lang} transcript to Burmese.
+    Input Text: "{text}"
     
-    Use the 'H-V-C' structure:
-    Hook (0-30s): A visual or verbal pattern interrupt to grab attention immediately.
-    Value (Body): 3 distinct value points, with a 're-engagement' moment every 60 seconds.
-    Call (End): A specific call to action related to this topic.
+    CRITICAL RULES:
+    1. Translate to natural Burmese.
+    2. **DO NOT TRANSLATE PROPER NOUNS OR TECHNICAL TERMS.** Keep Names, Places, and specific Objects in English (e.g., "iPhone", "New York", "John").
+    3. Output ONLY the translated text.
+    """
+    try: return model.generate_content(prompt).text
+    except Exception as e: return f"AI Error: {e}"
+
+def refine_script_hvc(model, text, title, custom_prompt):
+    prompt = f"""
+    Act as a Professional Video Scriptwriter.
+    Refine the following Burmese draft into a final script for a video titled '{title}'.
+    
+    Input Draft: "{text}"
+    
+    Structure Constraint: Use the **'H-V-C' (Hook-Value-Call)** structure.
+    1. Hook (0-30s): Grab attention.
+    2. Value (Body): Deliver the core message/story.
+    3. Call (End): Call to action.
+    
+    OUTPUT FORMAT RULE: 
+    - **Output ONLY the spoken words (Host Voice) in Burmese.** - Do NOT include labels like "Hook:", "Scene 1:", etc. 
+    - Just the raw text to be spoken.
+    - Keep English nouns/names in English.
     
     Additional Instructions: {custom_prompt}
-    
-    CRITICAL: Translate the final output into spoken Burmese (Myanmar).
     """
     try: return model.generate_content(prompt).text
     except Exception as e: return f"AI Error: {e}"
@@ -127,26 +146,33 @@ def generate_viral_metadata(model, title, keywords):
     except Exception as e: return f"AI Error: {e}"
 
 # ---------------------------------------------------------
-# ❄️ FREEZE FRAME ENGINE (FIXED)
+# ❄️ FREEZE FRAME ENGINE
 # ---------------------------------------------------------
 def process_freeze_command(command, input_video, output_video):
     """
-    Parses [freeze 10,5] -> Freezes at 10s for 5s duration.
+    Parses [freeze 10,5] or [duration 10,5]
+    Format: command time_point, duration
     """
     try:
-        match = re.search(r'freeze\s*(\d+),(\d+)', command, re.IGNORECASE)
+        # Regex to find "freeze" or "duration" followed by two numbers
+        match = re.search(r'(freeze|duration)\s*[:=]?\s*(-?\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
+        
         if match:
-            time_point = match.group(1)
-            duration = match.group(2)
+            time_point = float(match.group(2))
+            duration = float(match.group(3))
             
-            # 1. Cut Part A
+            # Handle negative time (relative to end) - basic implementation assumes positive
+            if time_point < 0: time_point = 0 # Fallback for simplicity
+            
+            # FFmpeg: Cut A, Freeze Frame, Cut B, Concat
+            # 1. Part A
             subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(time_point), '-c', 'copy', 'part_a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 2. Freeze Frame
+            # 2. Freeze
             subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-vframes', '1', 'freeze.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'freeze.jpg', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'part_freeze.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            # 3. Cut Part B
+            # 3. Part B
             subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-c', 'copy', 'part_b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             # 4. Concat
@@ -162,7 +188,7 @@ def process_freeze_command(command, input_video, output_video):
             return True
         return False
     except Exception as e:
-        print(f"Freeze Error: {e}")
+        print(f"Freeze Logic Error: {e}")
         return False
 
 # ---------------------------------------------------------
@@ -184,89 +210,102 @@ t1, t2 = st.tabs(["🎬 Production Studio", "🚀 Viral Kit (SEO)"])
 
 # === TAB 1: PRODUCTION ===
 with t1:
-    st.subheader("Step 1: Upload & Script")
+    # --- STEP 1: UPLOAD & TRANSLATE ---
+    st.subheader("Step 1: Upload & Initial Translate")
     uploaded = st.file_uploader("Upload Video", type=['mp4','mov'])
+    
+    # Language Selection
+    source_lang = st.selectbox("Original Video Language", ["English", "Japanese", "Chinese", "Thai", "Indian (Hindi)"])
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
         
-        if st.button("📝 Extract Transcript"):
-            with st.spinner("Processing..."):
+        if st.button("📝 Extract & Translate to Burmese"):
+            with st.spinner("Listening & Translating..."):
                 check_requirements()
                 # Extract Audio
                 subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # Transcribe
-                text = transcribe_video("temp.wav")
-                st.session_state.transcript = text
-                st.rerun()
-
-    if st.session_state.transcript:
-        en_text = st.text_area("English Transcript", st.session_state.transcript, height=100)
-        c1, c2 = st.columns(2)
-        with c1: style = st.selectbox("Style", ["Movie Recap", "News", "Funny"])
-        with c2: custom = st.text_input("Extra Instructions", "Make it exciting")
-        
-        if st.button("🤖 Generate H-V-C Script"):
-            with st.spinner("Writing Script..."):
+                
+                # Transcribe (Get Original Text)
+                raw_text = transcribe_video("temp.wav")
+                st.session_state.raw_transcript = raw_text
+                
+                # Translate immediately to Burmese (Draft)
                 model = get_model(st.session_state.api_key, model_name)
-                # Using Video Filename as Title approximation or Generic
-                res = generate_hvc_script(model, "My Video", en_text, style, custom)
-                st.session_state.burmese_script = res
+                draft = translate_to_burmese_draft(model, raw_text, source_lang)
+                st.session_state.burmese_draft = draft
                 st.rerun()
 
-    if st.session_state.burmese_script:
-        st.subheader("Step 2: Edit & Freeze")
-        final_script = st.text_area("Burmese Script (H-V-C)", st.session_state.burmese_script, height=250)
+    # --- STEP 2: REFINE SCRIPT ---
+    if st.session_state.burmese_draft:
+        st.subheader("Step 2: Script Refinement")
+        # Show Burmese Draft directly (User wanted to see Burmese immediately)
+        draft_text = st.text_area("Burmese Draft (Translated)", st.session_state.burmese_draft, height=150)
         
-        # 🔥 FREEZE CONTROL
-        st.markdown("#### ❄️ Freeze Control")
-        st.caption("Example: `freeze 10,5` (Freeze at 10s for 5s)")
-        freeze_cmd = st.text_input("Freeze Command (Optional)")
+        custom_prompt = st.text_input("Script Instructions", "Make it exciting, H-V-C style")
         
-        vc1, vc2 = st.columns(2)
-        with vc1: voice = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
+        if st.button("✨ Convert to H-V-C Final Script"):
+            with st.spinner("Applying Magic..."):
+                model = get_model(st.session_state.api_key, model_name)
+                # Use "My Video" as generic title or ask user
+                final = refine_script_hvc(model, draft_text, "My Video", custom_prompt)
+                st.session_state.final_script = final
+                st.rerun()
+
+    # --- STEP 3: AUDIO & FREEZE ---
+    if st.session_state.final_script:
+        st.subheader("Step 3: Audio, Sync & Freeze")
+        final_script_edit = st.text_area("Final Script (Host Voice Only)", st.session_state.final_script, height=200)
         
-        if st.button("🔊 Generate Audio & Sync"):
-            with st.spinner("Processing..."):
+        c1, c2 = st.columns(2)
+        with c1: 
+            voice = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
+        with c2:
+            # 🔥 MOVED FREEZE COMMAND HERE
+            freeze_cmd = st.text_input("Freeze/Duration Command", placeholder="e.g. freeze 10,5 or duration 10,5")
+            st.caption("Freeze video at 10s for 5s duration.")
+
+        if st.button("🚀 Generate Final Video"):
+            with st.spinner("Rendering..."):
                 v_id = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
                 
-                # 1. Handle Freeze
-                input_video_file = "input.mp4"
+                # 1. Handle Freeze First (Modify Input Video)
+                working_video = "input.mp4"
                 if freeze_cmd:
-                    if process_freeze_command(freeze_cmd, "input.mp4", "frozen_input.mp4"):
-                        input_video_file = "frozen_input.mp4"
-                        st.success(f"Video Frozen with: {freeze_cmd}")
-                
+                    if process_freeze_command(freeze_cmd, "input.mp4", "frozen_output.mp4"):
+                        working_video = "frozen_output.mp4"
+                        st.success(f"Video modified with: {freeze_cmd}")
+                    else:
+                        st.warning("Freeze command ignored (Format error). Using original video.")
+
                 # 2. Generate Audio
-                clean_text = final_script.replace("*", "").replace("#", "").strip() # Remove MD formatting
+                clean_text = final_script_edit.replace("*", "").strip()
                 generate_audio_cli(clean_text, v_id, "+0%", "+0Hz", "base_voice.mp3")
-                st.session_state.audio_path = "base_voice.mp3"
                 
-                # 3. Sync Logic
-                vid_dur = get_duration(input_video_file)
+                # 3. Sync Logic (Auto Speed)
+                vid_dur = get_duration(working_video)
                 aud_dur = get_duration("base_voice.mp3")
                 
-                # Auto-Speed logic to fit video
                 speed_factor = 1.0
                 if vid_dur > 0 and aud_dur > vid_dur:
                     speed_factor = aud_dur / vid_dur
-                    speed_factor = min(speed_factor, 1.5) 
+                    speed_factor = min(speed_factor, 1.5) # Cap speed
                 
                 subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={speed_factor}", "final_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Final Render
+                # 4. Final Merge
                 outfile = f"final_{int(time.time())}.mp4"
                 cmd = [
-                    'ffmpeg', '-y', '-i', input_video_file, '-i', "final_audio.mp3",
+                    'ffmpeg', '-y', '-i', working_video, '-i', "final_audio.mp3",
                     '-map', '0:v', '-map', '1:a',
                     '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile
                 ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                st.success("✅ Video Ready!")
+                st.success("✅ Video Created Successfully!")
                 st.video(outfile)
                 with open(outfile, "rb") as f:
-                    st.download_button("Download", f, "final.mp4")
+                    st.download_button("Download", f, "final_dubbed.mp4")
 
 # === TAB 2: VIRAL KIT ===
 with t2:
