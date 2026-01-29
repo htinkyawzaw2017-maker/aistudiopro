@@ -14,6 +14,7 @@ import whisper
 from pydub import AudioSegment
 import time
 import json
+import re
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -27,8 +28,8 @@ st.markdown("""
         color: white; border: none; height: 50px; font-weight: bold; width: 100%;
         border-radius: 10px; font-size: 16px;
     }
-    .info-box { padding: 15px; background: #222; border: 1px solid #444; border-radius: 8px; margin: 10px 0; }
-    .sync-badge { background-color: #007bff; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+    textarea { font-size: 1.1rem !important; }
+    .viral-box { background: #111; padding: 15px; border-left: 4px solid #00ff00; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -39,6 +40,7 @@ if 'transcript' not in st.session_state: st.session_state.transcript = ""
 if 'burmese_script' not in st.session_state: st.session_state.burmese_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'audio_path' not in st.session_state: st.session_state.audio_path = ""
+if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
@@ -56,7 +58,7 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (CLI)
+# 🔊 AUDIO ENGINE
 # ---------------------------------------------------------
 def generate_audio_cli(text, voice, rate, pitch, output_file):
     try:
@@ -73,7 +75,7 @@ def generate_audio_cli(text, voice, rate, pitch, output_file):
     except: return False
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (SAFETY BYPASS)
+# 🧠 AI ENGINE (PROMPT ENGINEERED)
 # ---------------------------------------------------------
 def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
@@ -85,24 +87,88 @@ def get_model(api_key, model_name):
     ]
     return genai.GenerativeModel(model_name, safety_settings=safety_settings)
 
-def transcribe_video(video_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(video_path)
-    return result['text']
-
 def generate_rewrite(model, text, style, custom_prompt):
     prompt = f"""
-    Role: Professional Movie Recap Scriptwriter.
-    Task: Rewrite/Translate the English transcript into Burmese.
+    Act as a Master Storyteller.
+    Rewrite/Translate the following transcript into Burmese.
     Input: "{text}"
+    
+    Structure (H-V-C):
+    1. Hook: Start with a strong, attention-grabbing opening sentence.
+    2. Value: Tell the story engagingly.
+    3. Call: End with a clear conclusion.
+    
     Style: {style}
-    User Instruction: {custom_prompt}
-    Rules: Burmese ONLY. No Censorship (Fictional Context).
+    Instructions: {custom_prompt}
+    Rules: Burmese Only. No Censorship.
+    """
+    try: return model.generate_content(prompt).text
+    except: return "Error: AI Blocked."
+
+def generate_viral_metadata(model, title, keywords):
+    prompt = f"""
+    Write a YouTube Video Description for '{title}' optimized for SEO.
+    
+    Keywords to include: {keywords}
+    
+    Structure:
+    1. **Hook Paragraph**: Natural, engaging, includes keywords.
+    2. **What You Will Learn**: Bullet points.
+    3. **Timestamps**: 5 key chapters (0:00 Intro, etc.).
+    4. **Tags**: 15 high-traffic tags, comma-separated.
+    
+    Language: English (for SEO) but with Burmese Context if implied.
+    """
+    try: return model.generate_content(prompt).text
+    except: return "Error generating metadata."
+
+# ---------------------------------------------------------
+# ❄️ FREEZE FRAME ENGINE
+# ---------------------------------------------------------
+def process_freeze_command(command, input_video, output_video):
+    """
+    Parses [freeze -3,6] -> Freezes at 3s for 6s duration.
+    Parses [duration 4,8] -> Extends timestamp 4s by 8s.
     """
     try:
-        response = model.generate_content(prompt)
-        return response.text
-    except: return "Error: AI blocked the response. Please write manually."
+        # Extract numbers: [freeze -3,6] -> 3, 6
+        match = re.search(r'freeze\s*-?(\d+),(\d+)', command, re.IGNORECASE)
+        if match:
+            time_point = float(match.group(1))
+            duration = float(match.group(2))
+            
+            # FFmpeg Filter: Split video, Trim, Loop the freeze frame, Concat
+            # This is complex, so we use a simpler pause approach:
+            # 1. Cut Part A (0 to time_point)
+            # 2. Cut Frame at time_point and loop it for duration
+            # 3. Cut Part B (time_point to end)
+            # 4. Concat A + Freeze + B
+            
+            # 1. Part A
+            subprocess.run(['ffmpeg', '-y', '-i', input_file, '-t', str(time_point), '-c', 'copy', 'part_a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 2. Freeze
+            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_file, '-vframes', '1', 'freeze.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'freeze.jpg', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'part_freeze.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 3. Part B
+            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_file, '-c', 'copy', 'part_b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 4. Concat (Need text file)
+            with open("list.txt", "w") as f:
+                f.write("file 'part_a.mp4'\nfile 'part_freeze.mp4'\nfile 'part_b.mp4'")
+            
+            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Cleanup
+            for f in ['part_a.mp4', 'part_b.mp4', 'part_freeze.mp4', 'freeze.jpg', 'list.txt']:
+                if os.path.exists(f): os.remove(f)
+                
+            return True
+        return False
+    except Exception as e:
+        print(e)
+        return False
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
@@ -111,45 +177,38 @@ with st.sidebar:
     st.title("🇲🇲 AI Studio Pro")
     api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
-    
     st.divider()
     model_name = st.text_input("Model ID", value="gemini-1.5-flash")
-    
-    if st.button("🔴 Reset App"):
+    if st.button("🔴 Reset"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
 if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
-# --- TABS ---
-t1, t2 = st.tabs(["🛠️ Manual Studio (Best)", "🚀 Auto Mode"])
+t1, t2 = st.tabs(["🎬 Production Studio", "🚀 Viral Kit (SEO)"])
 
+# === TAB 1: PRODUCTION ===
 with t1:
-    st.subheader("Step 1: Upload & Extract")
-    uploaded_file = st.file_uploader("Upload Video", type=['mp4', 'mov'])
+    st.subheader("Step 1: Upload & Script")
+    uploaded = st.file_uploader("Upload Video", type=['mp4','mov'])
     
-    if uploaded_file:
-        with open("input.mp4", "wb") as f: f.write(uploaded_file.getbuffer())
-        
+    if uploaded:
+        with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
         if st.button("📝 Extract Transcript"):
             with st.spinner("Processing..."):
                 check_requirements()
-                # Audio extraction for Whisper
                 subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 text = transcribe_video("temp.wav")
                 st.session_state.transcript = text
-                st.success("Extracted!")
                 st.rerun()
 
     if st.session_state.transcript:
-        st.subheader("Step 2: Translate & Edit")
         en_text = st.text_area("English", st.session_state.transcript, height=100)
-        
         c1, c2 = st.columns(2)
         with c1: style = st.selectbox("Style", ["Movie Recap", "News", "Funny"])
-        with c2: custom = st.text_input("Instructions", "Exciting tone")
+        with c2: custom = st.text_input("Instructions", "H-V-C Structure")
         
-        if st.button("🤖 Generate Burmese Script"):
+        if st.button("🤖 Generate Burmese"):
             with st.spinner("Writing..."):
                 model = get_model(st.session_state.api_key, model_name)
                 res = generate_rewrite(model, en_text, style, custom)
@@ -157,115 +216,80 @@ with t1:
                 st.rerun()
 
     if st.session_state.burmese_script:
-        st.subheader("Step 3: Audio Generation")
-        final_script = st.text_area("Burmese Script (Edit here)", st.session_state.burmese_script, height=250)
+        st.subheader("Step 2: Edit & Freeze")
+        final_script = st.text_area("Burmese Script", st.session_state.burmese_script, height=200)
+        
+        # 🔥 FREEZE COMMAND INPUT
+        st.markdown("#### ❄️ Freeze / Duration Control")
+        st.caption("Example: `[freeze 10,5]` (Freeze at 10s for 5s) or Leave empty.")
+        freeze_cmd = st.text_input("Freeze Command (Optional)")
         
         vc1, vc2 = st.columns(2)
         with vc1: voice = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
         
-        if st.button("🔊 Generate Base Audio"):
-            with st.spinner("Creating Audio..."):
+        if st.button("🔊 Generate Audio & Sync"):
+            with st.spinner("Processing..."):
                 v_id = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
+                
+                # 1. Handle Freeze if needed
+                input_video_file = "input.mp4"
+                if freeze_cmd:
+                    if process_freeze_command(freeze_cmd, "input.mp4", "frozen_input.mp4"):
+                        input_video_file = "frozen_input.mp4"
+                        st.success(f"Video Frozen with command: {freeze_cmd}")
+                
+                # 2. Generate Audio
                 clean_text = final_script.replace("\n", " ").strip()
-                if generate_audio_cli(clean_text, v_id, "+0%", "+0Hz", "base_voice.mp3"):
-                    st.session_state.audio_path = "base_voice.mp3"
-                    st.success("Audio Generated!")
-                    st.rerun()
-                else:
-                    st.error("TTS Failed")
-
-    # --- STEP 4: SYNC MASTER (NEW FEATURE) ---
-    if st.session_state.audio_path and os.path.exists("base_voice.mp3") and os.path.exists("input.mp4"):
-        st.subheader("Step 4: Sync & Merge (Video/Audio Matching)")
-        
-        # Calculate Durations
-        vid_dur = get_duration("input.mp4")
-        aud_dur = get_duration("base_voice.mp3")
-        
-        # Display Stats
-        col1, col2, col3 = st.columns(3)
-        col1.metric("🎥 Video Duration", f"{vid_dur:.2f}s")
-        col2.metric("🎙️ Audio Duration", f"{aud_dur:.2f}s")
-        diff = aud_dur - vid_dur
-        col3.metric("Difference", f"{diff:.2f}s", delta_color="inverse" if diff > 0 else "normal")
-
-        st.markdown("---")
-        st.markdown("#### 🎛️ Speed Controls")
-        
-        sc1, sc2 = st.columns(2)
-        with sc1:
-            st.markdown("**Video Speed** (Change Video Length)")
-            # Slider: 0.5x (Slow) to 2.0x (Fast)
-            # If Audio is longer (e.g. 120s) and Video is (100s), we need to SLOW video (0.8x) to stretch it to 120s.
-            suggested_vid_speed = 1.0
-            if aud_dur > vid_dur:
-                suggested_vid_speed = vid_dur / aud_dur # e.g. 100/120 = 0.83
-            
-            vid_speed = st.slider("Video Speed Multiplier", 0.5, 2.0, float(round(suggested_vid_speed, 2)), 0.05)
-            st.caption(f"Less than 1.0 = Slow Motion (Stretches Video). Greater than 1.0 = Fast Forward.")
-
-        with sc2:
-            st.markdown("**Audio Speed** (Change Audio Length)")
-            # Slider
-            aud_speed = st.slider("Audio Speed Multiplier", 0.5, 2.0, 1.0, 0.05)
-            st.caption(f"Greater than 1.0 = Faster Speaking. Less than 1.0 = Slower Speaking.")
-
-        st.markdown("---")
-        st.markdown("#### 🎚️ Mixing")
-        mix_orig = st.checkbox("Keep Original Background Audio?", value=True)
-        bg_vol = st.slider("Background Volume", 0, 100, 10)
-
-        if st.button("🎬 Render Final Video"):
-            with st.spinner("Rendering..."):
-                # 1. Process Audio Speed
-                final_audio_file = "final_audio.mp3"
-                subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={aud_speed}", final_audio_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                generate_audio_cli(clean_text, v_id, "+0%", "+0Hz", "base_voice.mp3")
+                st.session_state.audio_path = "base_voice.mp3"
                 
-                # 2. Process Video Speed
-                # PTS filter: setpts=(1/SPEED)*PTS
-                final_video_input = "input.mp4"
+                # 3. Sync Logic
+                vid_dur = get_duration(input_video_file)
+                aud_dur = get_duration("base_voice.mp3")
                 
-                # 3. Final Command Construction
-                outfile = f"final_render_{int(time.time())}.mp4"
+                speed_factor = 1.0
+                if vid_dur > 0 and aud_dur > vid_dur:
+                    speed_factor = aud_dur / vid_dur
+                    speed_factor = min(speed_factor, 1.5) # Cap at 1.5x
                 
-                # Video Filter Chain (Speed)
-                # setpts=PTS/vid_speed
-                v_filter = f"setpts=PTS/{vid_speed}"
+                # Process Audio Speed
+                subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={speed_factor}", "final_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                if mix_orig:
-                    # Complex Filter for Mixing + Video Speed
-                    vol_factor = bg_vol / 100.0
-                    # [0:v]setpts...[v]; [0:a]volume..[bg]; [1:a]...[fg]; [bg][fg]amix...
-                    cmd = [
-                        'ffmpeg', '-y',
-                        '-i', "input.mp4", 
-                        '-i', final_audio_file,
-                        '-filter_complex', f'[0:v]{v_filter}[v];[0:a]volume={vol_factor}[bg];[1:a]volume=1.5[fg];[bg][fg]amix=inputs=2:duration=longest[aout]',
-                        '-map', '[v]', '-map', '[aout]',
-                        '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac',
-                        outfile
-                    ]
-                else:
-                    # Video Speed + Replace Audio
-                    cmd = [
-                        'ffmpeg', '-y',
-                        '-i', "input.mp4",
-                        '-i', final_audio_file,
-                        '-filter_complex', f'[0:v]{v_filter}[v]',
-                        '-map', '[v]', '-map', '1:a',
-                        '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac',
-                        outfile
-                    ]
+                # Render
+                outfile = f"final_{int(time.time())}.mp4"
                 
+                # Video Speed Filter (Inverse of audio speed factor if we want to stretch video, but here we sped up audio)
+                # If audio was sped up, video stays normal.
+                # If we want to STRETCH video to match audio (Slow Motion):
+                # setpts = (Target/Original)*PTS
+                
+                cmd = [
+                    'ffmpeg', '-y', '-i', input_video_file, '-i', "final_audio.mp3",
+                    '-map', '0:v', '-map', '1:a',
+                    '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile
+                ]
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                if os.path.exists(outfile):
-                    st.success("✅ Rendering Complete!")
-                    st.video(outfile)
-                    with open(outfile, "rb") as f:
-                        st.download_button("Download Video", f, "myanmar_dub.mp4")
-                else:
-                    st.error("Rendering Failed.")
+                st.video(outfile)
+                with open(outfile, "rb") as f:
+                    st.download_button("Download", f, "final.mp4")
 
+# === TAB 2: VIRAL KIT ===
 with t2:
-    st.info("Please use the Manual Studio (Tab 1) for full control.")
+    st.subheader("🚀 Viral Kit & SEO")
+    v_title = st.text_input("Video Title")
+    v_keywords = st.text_input("Keywords (comma separated)")
+    
+    if st.button("✨ Generate Viral Metadata"):
+        if not v_title: st.error("Add Title")
+        else:
+            with st.spinner("Analyzing SEO..."):
+                model = get_model(st.session_state.api_key, model_name)
+                res = generate_viral_metadata(model, v_title, v_keywords)
+                st.session_state.seo_result = res
+                st.rerun()
+    
+    if st.session_state.seo_result:
+        st.markdown("<div class='viral-box'>", unsafe_allow_html=True)
+        st.markdown(st.session_state.seo_result)
+        st.markdown("</div>", unsafe_allow_html=True)
