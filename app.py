@@ -18,7 +18,7 @@ import re
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 UI & CSS SETUP
+# 🎨 UI & CSS SETUP (MODERN DASHBOARD DESIGN)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide")
 
@@ -72,7 +72,7 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (FIXED COMMAND FORMAT)
+# 🔊 AUDIO ENGINE
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
@@ -101,7 +101,7 @@ def generate_audio_cli(text, lang, gender, mode_name, output_file):
         voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
         settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
         
-        # 🔥 CRITICAL FIX: Use --flag=value format to handle negative numbers safely
+        # Safe Argument Formatting
         rate_arg = f"--rate={settings['rate']}"
         pitch_arg = f"--pitch={settings['pitch']}"
         
@@ -109,8 +109,8 @@ def generate_audio_cli(text, lang, gender, mode_name, output_file):
             "edge-tts",
             "--voice", voice_id,
             "--text", text,
-            rate_arg,   # Combined argument (Safer)
-            pitch_arg,  # Combined argument (Safer)
+            rate_arg,
+            pitch_arg,
             "--write-media", output_file
         ]
         
@@ -246,4 +246,118 @@ t1, t2 = st.tabs(["🎬 Production", "🚀 Viral SEO"])
 with t1:
     st.subheader("Step 1: Upload & Translate")
     uploaded = st.file_uploader("Upload Video", type=['mp4','mov'])
-    source_lang = st.selectbox("Original Language
+    source_lang = st.selectbox("Original Language", ["English", "Japanese", "Chinese", "Thai", "Hindi"])
+    
+    if uploaded:
+        with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
+        if st.button("📝 Extract & Translate"):
+            with st.spinner("Processing..."):
+                check_requirements()
+                subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                raw = transcribe_video("temp.wav")
+                st.session_state.raw_transcript = raw
+                model = get_model(st.session_state.api_key, model_name)
+                draft = translate_to_burmese_draft(model, raw, source_lang)
+                st.session_state.burmese_draft = draft
+                st.rerun()
+
+    if st.session_state.burmese_draft:
+        st.subheader("Step 2: Scripting")
+        draft_text = st.text_area("Burmese Draft", st.session_state.burmese_draft, height=150)
+        prompt = st.text_input("Style Instructions", "H-V-C structure")
+        if st.button("✨ Refine Script"):
+            with st.spinner("Refining..."):
+                model = get_model(st.session_state.api_key, model_name)
+                final = refine_script_hvc(model, draft_text, "Video", prompt)
+                st.session_state.final_script = final
+                st.rerun()
+
+    if st.session_state.final_script:
+        st.subheader("Step 3: Production")
+        final_text = st.text_area("Final Script", st.session_state.final_script, height=200)
+        
+        c1, c2, c3 = st.columns(3)
+        with c1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
+        with c2: gender = st.selectbox("Gender", ["Male", "Female"])
+        with c3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
+        zoom_val = st.slider("Zoom", 1.0, 1.1, 1.05, 0.01)
+        
+        ft1, ft2 = st.tabs(["Auto Freeze", "Manual Command"])
+        input_vid = "input.mp4"
+        processed_vid = "proc_visuals.mp4"
+        auto_freeze = None
+        manual_freeze = None
+        
+        with ft1:
+            if st.checkbox("Every 30s"): auto_freeze = 30
+            if st.checkbox("Every 1m"): auto_freeze = 60
+            if st.checkbox("Every 3m"): auto_freeze = 180
+        with ft2:
+            manual_freeze = st.text_input("Command", placeholder="freeze 10,5")
+
+        if st.button("🚀 Render Final Video"):
+            with st.spinner("Rendering..."):
+                # 1. AUDIO (Fixed Typo Here)
+                clean_text = final_text.replace("*", "").strip()
+                success, error_msg = generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3")
+                
+                if success:
+                    st.session_state.processed_audio_path = "final_audio.mp3"
+                    
+                    # 2. FREEZE
+                    if auto_freeze:
+                        if apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze): input_vid = "frozen.mp4"
+                    elif manual_freeze:
+                        if process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"): input_vid = "frozen.mp4"
+                    
+                    # 3. ZOOM & UPSCALE
+                    w_s = int(1920 * zoom_val)
+                    h_s = int(1080 * zoom_val)
+                    if w_s % 2 != 0: w_s += 1
+                    if h_s % 2 != 0: h_s += 1
+                    
+                    vf = f"scale={w_s}:{h_s},crop=1920:1080"
+                    subprocess.run(['ffmpeg', '-y', '-i', input_vid, '-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy', processed_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # 4. SYNC
+                    v_dur = get_duration(processed_vid)
+                    a_dur = get_duration("final_audio.mp3")
+                    speed = 1.0
+                    if v_dur > 0 and a_dur > v_dur: speed = min(a_dur / v_dur, 1.5)
+                    
+                    subprocess.run(['ffmpeg', '-y', '-i', "final_audio.mp3", '-filter:a', f"atempo={speed}", "sync_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # 5. MERGE
+                    outfile = f"final_{int(time.time())}.mp4"
+                    cmd = ['ffmpeg', '-y', '-i', processed_vid, '-i', "sync_audio.mp3", '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    st.session_state.processed_video_path = outfile
+                    st.success("✅ Done!")
+                else:
+                    st.error(f"❌ Audio Failed: {error_msg}")
+
+    if st.session_state.processed_video_path:
+        st.divider()
+        c1, c2 = st.columns(2)
+        with c1:
+            with open(st.session_state.processed_video_path, "rb") as f:
+                st.download_button("🎬 Video", f, "video.mp4")
+        with c2:
+            if st.session_state.processed_audio_path:
+                with open(st.session_state.processed_audio_path, "rb") as f:
+                    st.download_button("🎵 Audio", f, "audio.mp3")
+        st.video(st.session_state.processed_video_path)
+
+with t2:
+    st.subheader("Viral SEO")
+    title = st.text_input("Title")
+    keys = st.text_input("Keywords")
+    lang = st.selectbox("SEO Lang", ["Myanmar", "English", "Thai", "Chinese"])
+    if st.button("Generate"):
+        model = get_model(st.session_state.api_key, model_name)
+        res = generate_viral_metadata(model, title, keys, lang)
+        st.session_state.seo_result = res
+        st.rerun()
+    if st.session_state.seo_result:
+        st.markdown(f"<div class='viral-box'>{st.session_state.seo_result}</div>", unsafe_allow_html=True)
