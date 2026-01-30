@@ -1,8 +1,4 @@
-streamlit
 google-generativeai
 edge-tts
-ffmpeg-python
 openai-whisper
 pydub
-beautifulsoup4
-html5lib
