@@ -18,24 +18,35 @@ import re
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP
+# 🎨 UI & CSS SETUP (MODERN DASHBOARD DESIGN)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🇲🇲", layout="wide")
+st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide")
+
 st.markdown("""
     <style>
-    .stApp { background-color: #0e1117; color: #ffffff; }
-    .stButton>button {
-        background: linear-gradient(90deg, #FF4B2B, #FF416C); 
-        color: white; border: none; height: 50px; font-weight: bold; width: 100%;
-        border-radius: 10px; font-size: 16px;
+    .stApp { background-color: #050505; color: #e0e0e0; }
+    .main-header {
+        font-family: 'Helvetica Neue', sans-serif;
+        background: linear-gradient(90deg, #1CB5E0 0%, #000851 100%);
+        padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px;
     }
-    textarea { font-size: 1.1rem !important; font-family: 'Padauk', sans-serif !important; }
-    .viral-box { background: #111; padding: 15px; border-left: 4px solid #00ff00; margin-top: 10px; }
+    .main-header h1 { color: white; margin: 0; font-size: 2.5rem; font-weight: 700; }
+    .stButton>button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white; border: none; height: 50px; font-weight: bold; width: 100%;
+        border-radius: 12px; font-size: 16px;
+    }
+    textarea, input { 
+        background-color: #1a1a1a !important; color: #fff !important; 
+        border: 1px solid #333 !important; border-radius: 8px !important;
+        font-family: 'Padauk', sans-serif !important;
+    }
+    .viral-box { background: #0f0f0f; padding: 20px; border-left: 5px solid #00ff88; margin-top: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 💾 STATE
+# 💾 STATE MANAGEMENT
 # ---------------------------------------------------------
 if 'raw_transcript' not in st.session_state: st.session_state.raw_transcript = ""
 if 'burmese_draft' not in st.session_state: st.session_state.burmese_draft = ""
@@ -74,26 +85,18 @@ VOICE_MAP = {
 
 VOICE_MODES = {
     "Normal": {"rate": "+0%", "pitch": "+0Hz"},
-    "Story": {"rate": "-10%", "pitch": "-5Hz"},
-    "Documentary": {"rate": "-5%", "pitch": "-10Hz"},
-    "Recap": {"rate": "+10%", "pitch": "+0Hz"},
-    "Motivation": {"rate": "-10%", "pitch": "-15Hz"},
-    "Animation": {"rate": "+5%", "pitch": "+20Hz"}
+    "Story": {"rate": "-5%", "pitch": "-5Hz"},
+    "Documentary": {"rate": "-2%", "pitch": "-8Hz"},
+    "Recap": {"rate": "+5%", "pitch": "+0Hz"},
+    "Motivation": {"rate": "-8%", "pitch": "-12Hz"},
+    "Animation": {"rate": "+10%", "pitch": "+15Hz"}
 }
 
 def generate_audio_cli(text, lang, gender, mode_name, output_file):
     try:
         voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
         settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
-        
-        cmd = [
-            "edge-tts",
-            "--voice", voice_id,
-            "--text", text,
-            "--rate", settings["rate"],
-            "--pitch", settings["pitch"],
-            "--write-media", output_file
-        ]
+        cmd = ["edge-tts", "--voice", voice_id, "--text", text, "--rate", settings["rate"], "--pitch", settings["pitch"], "--write-media", output_file]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return os.path.exists(output_file) and os.path.getsize(output_file) > 100
     except: return False
@@ -131,7 +134,7 @@ def refine_script_hvc(model, text, title, custom_prompt):
     Refine this Burmese draft for video '{title}'.
     Input: "{text}"
     Structure: H-V-C (Hook, Value, Call).
-    Constraint: Keep length same as draft. Do not summarize.
+    Constraint: Keep content length roughly same as draft. Do not summarize too much.
     Output: Only Burmese spoken text.
     Extra: {custom_prompt}
     """
@@ -149,7 +152,7 @@ def generate_viral_metadata(model, title, keywords, lang):
     except: return "AI Error"
 
 # ---------------------------------------------------------
-# ❄️ FREEZE & VIDEO ENGINE (FIXED INTEGERS)
+# ❄️ FREEZE & VIDEO ENGINE (INT FIX)
 # ---------------------------------------------------------
 def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
     try:
@@ -164,7 +167,6 @@ def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4
                 nxt = min(curr + interval_sec, duration)
                 seg_dur = nxt - curr
                 p_name = f"p_{idx}.mp4"
-                
                 subprocess.run(['ffmpeg', '-y', '-ss', str(curr), '-t', str(seg_dur), '-i', input_video, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 f.write(f"file '{p_name}'\n")
                 
@@ -173,10 +175,8 @@ def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4
                     subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', p_name, '-update', '1', '-q:v', '1', 'frame.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'frame.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     f.write(f"file '{f_name}'\n")
-                
                 curr = nxt
                 idx += 1
-                
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except: return False
@@ -185,18 +185,13 @@ def process_freeze_command(command, input_video, output_video):
     try:
         match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
         if match:
-            time_point = float(match.group(1))
+            t_pt = float(match.group(1))
             dur = float(match.group(2))
-            
-            # Use filter_complex for safer freeze
-            # But stick to split/concat for speed
-            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(time_point), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(t_pt), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(dur), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'fr.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            with open("list.txt", "w") as f:
-                f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open("list.txt", "w") as f: f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
             subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         return False
@@ -205,9 +200,11 @@ def process_freeze_command(command, input_video, output_video):
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
 # ---------------------------------------------------------
+st.markdown("""<div class="main-header"><h1>🎬 Myanmar AI Studio Pro</h1></div>""", unsafe_allow_html=True)
+
 with st.sidebar:
-    st.title("🇲🇲 AI Studio Pro")
-    api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
+    st.header("⚙️ Settings")
+    api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
     st.divider()
     model_name = st.text_input("Model ID", value="gemini-2.5-flash")
@@ -220,8 +217,7 @@ if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 t1, t2 = st.tabs(["🎬 Production", "🚀 Viral SEO"])
 
 with t1:
-    # STEP 1
-    st.subheader("Step 1: Upload & Initial Translate")
+    st.subheader("Step 1: Upload & Translate")
     uploaded = st.file_uploader("Upload Video", type=['mp4','mov'])
     source_lang = st.selectbox("Original Language", ["English", "Japanese", "Chinese", "Thai", "Hindi"])
     
@@ -238,11 +234,10 @@ with t1:
                 st.session_state.burmese_draft = draft
                 st.rerun()
 
-    # STEP 2
     if st.session_state.burmese_draft:
-        st.subheader("Step 2: Script Refinement")
+        st.subheader("Step 2: Scripting")
         draft_text = st.text_area("Burmese Draft", st.session_state.burmese_draft, height=150)
-        prompt = st.text_input("Instructions", "H-V-C structure")
+        prompt = st.text_input("Style Instructions", "H-V-C structure")
         if st.button("✨ Refine Script"):
             with st.spinner("Refining..."):
                 model = get_model(st.session_state.api_key, model_name)
@@ -250,7 +245,6 @@ with t1:
                 st.session_state.final_script = final
                 st.rerun()
 
-    # STEP 3
     if st.session_state.final_script:
         st.subheader("Step 3: Production")
         final_text = st.text_area("Final Script", st.session_state.final_script, height=200)
@@ -259,8 +253,6 @@ with t1:
         with c1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
-        
-        st.markdown("**Video Controls**")
         zoom_val = st.slider("Zoom", 1.0, 1.1, 1.05, 0.01)
         
         ft1, ft2 = st.tabs(["Auto Freeze", "Manual Command"])
@@ -278,38 +270,31 @@ with t1:
 
         if st.button("🚀 Render Final Video"):
             with st.spinner("Rendering..."):
-                # 1. AUDIO
-                clean_txt = final_text.replace("*", "").strip()
+                # 1. AUDIO (Fixed Typo Here)
+                clean_text = final_text.replace("*", "").strip() # This matches the function call now
                 if generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3"):
                     st.session_state.processed_audio_path = "final_audio.mp3"
                     
                     # 2. FREEZE
                     if auto_freeze:
-                        if apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze):
-                            input_vid = "frozen.mp4"
+                        if apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze): input_vid = "frozen.mp4"
                     elif manual_freeze:
-                        if process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"):
-                            input_vid = "frozen.mp4"
+                        if process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"): input_vid = "frozen.mp4"
                     
-                    # 3. ZOOM & UPSCALE (CRITICAL INT FIX)
-                    # Convert float zoom to integer width/height
-                    # 1920 * 1.05 = 2016.0 -> int(2016)
-                    w_scaled = int(1920 * zoom_val)
-                    h_scaled = int(1080 * zoom_val)
-                    # Ensure divisible by 2
-                    if w_scaled % 2 != 0: w_scaled += 1
-                    if h_scaled % 2 != 0: h_scaled += 1
+                    # 3. ZOOM & UPSCALE (Fixed Integer Issue)
+                    w_s = int(1920 * zoom_val)
+                    h_s = int(1080 * zoom_val)
+                    if w_s % 2 != 0: w_s += 1
+                    if h_s % 2 != 0: h_s += 1
                     
-                    zoom_filter = f"scale={w_scaled}:{h_scaled},crop=1920:1080"
-                    
-                    subprocess.run(['ffmpeg', '-y', '-i', input_vid, '-vf', zoom_filter, '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy', processed_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    vf = f"scale={w_s}:{h_s},crop=1920:1080"
+                    subprocess.run(['ffmpeg', '-y', '-i', input_vid, '-vf', vf, '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy', processed_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     # 4. SYNC
-                    vid_dur = get_duration(processed_vid)
-                    aud_dur = get_duration("final_audio.mp3")
+                    v_dur = get_duration(processed_vid)
+                    a_dur = get_duration("final_audio.mp3")
                     speed = 1.0
-                    if vid_dur > 0 and aud_dur > vid_dur:
-                        speed = min(aud_dur / vid_dur, 1.5)
+                    if v_dur > 0 and a_dur > v_dur: speed = min(a_dur / v_dur, 1.5)
                     
                     subprocess.run(['ffmpeg', '-y', '-i', "final_audio.mp3", '-filter:a', f"atempo={speed}", "sync_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
@@ -321,28 +306,26 @@ with t1:
                     st.session_state.processed_video_path = outfile
                     st.success("✅ Done!")
                 else:
-                    st.error("❌ Audio Generation Failed! (Empty text or API error)")
+                    st.error("❌ Audio Failed. Check API Key or Text.")
 
-    # DOWNLOADS
-    if st.session_state.processed_video_path and os.path.exists(st.session_state.processed_video_path):
+    if st.session_state.processed_video_path:
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
             with open(st.session_state.processed_video_path, "rb") as f:
-                st.download_button("🎬 Download Video", f, "final_video.mp4")
+                st.download_button("🎬 Video", f, "video.mp4")
         with c2:
             if st.session_state.processed_audio_path:
                 with open(st.session_state.processed_audio_path, "rb") as f:
-                    st.download_button("🎵 Download Audio", f, "final_audio.mp3")
+                    st.download_button("🎵 Audio", f, "audio.mp3")
         st.video(st.session_state.processed_video_path)
 
-# === TAB 2: SEO ===
 with t2:
     st.subheader("Viral SEO")
     title = st.text_input("Title")
     keys = st.text_input("Keywords")
-    lang = st.selectbox("SEO Language", ["Myanmar", "English", "Thai", "Chinese"])
-    if st.button("Generate SEO"):
+    lang = st.selectbox("SEO Lang", ["Myanmar", "English", "Thai", "Chinese"])
+    if st.button("Generate"):
         model = get_model(st.session_state.api_key, model_name)
         res = generate_viral_metadata(model, title, keys, lang)
         st.session_state.seo_result = res
