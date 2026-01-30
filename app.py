@@ -18,7 +18,7 @@ import re
 from google.api_core import exceptions
 
 # ---------------------------------------------------------
-# 🎨 UI & CSS SETUP (MODERN DASHBOARD DESIGN)
+# 🎨 UI & CSS SETUP
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide")
 
@@ -72,7 +72,7 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE
+# 🔊 AUDIO ENGINE (DEBUG MODE ENABLED)
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
@@ -93,13 +93,37 @@ VOICE_MODES = {
 }
 
 def generate_audio_cli(text, lang, gender, mode_name, output_file):
+    # 1. Validation
+    if not text or not text.strip():
+        return False, "Input text is empty (စာသားမရှိပါ)"
+    
     try:
         voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
         settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
-        cmd = ["edge-tts", "--voice", voice_id, "--text", text, "--rate", settings["rate"], "--pitch", settings["pitch"], "--write-media", output_file]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return os.path.exists(output_file) and os.path.getsize(output_file) > 100
-    except: return False
+        
+        cmd = [
+            "edge-tts",
+            "--voice", voice_id,
+            "--text", text,
+            "--rate", settings["rate"],
+            "--pitch", settings["pitch"],
+            "--write-media", output_file
+        ]
+        
+        # 2. Run with Error Capture
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            # Return exact error from edge-tts
+            return False, f"TTS Error: {result.stderr}"
+            
+        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
+            return False, "File created but empty (0 bytes)."
+            
+        return True, "Success"
+        
+    except Exception as e:
+        return False, f"System Error: {str(e)}"
 
 # ---------------------------------------------------------
 # 🧠 AI ENGINE
@@ -152,7 +176,7 @@ def generate_viral_metadata(model, title, keywords, lang):
     except: return "AI Error"
 
 # ---------------------------------------------------------
-# ❄️ FREEZE & VIDEO ENGINE (INT FIX)
+# ❄️ FREEZE & VIDEO ENGINE
 # ---------------------------------------------------------
 def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
     try:
@@ -270,9 +294,11 @@ with t1:
 
         if st.button("🚀 Render Final Video"):
             with st.spinner("Rendering..."):
-                # 1. AUDIO (Fixed Typo Here)
-                clean_text = final_text.replace("*", "").strip() # Fixed variable name
-                if generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3"):
+                # 1. AUDIO (Enhanced Debug)
+                clean_text = final_text.replace("*", "").strip()
+                success, error_msg = generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3")
+                
+                if success:
                     st.session_state.processed_audio_path = "final_audio.mp3"
                     
                     # 2. FREEZE
@@ -306,18 +332,19 @@ with t1:
                     st.session_state.processed_video_path = outfile
                     st.success("✅ Done!")
                 else:
-                    st.error("❌ Audio Generation Failed! (Empty text or API error)")
+                    # SHOW EXACT ERROR
+                    st.error(f"❌ Audio Failed: {error_msg}")
 
     if st.session_state.processed_video_path:
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
             with open(st.session_state.processed_video_path, "rb") as f:
-                st.download_button("🎬 Download Video", f, "video.mp4")
+                st.download_button("🎬 Video", f, "video.mp4")
         with c2:
             if st.session_state.processed_audio_path:
                 with open(st.session_state.processed_audio_path, "rb") as f:
-                    st.download_button("🎵 Download Audio", f, "audio.mp3")
+                    st.download_button("🎵 Audio", f, "audio.mp3")
         st.video(st.session_state.processed_video_path)
 
 with t2:
