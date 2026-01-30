@@ -43,6 +43,7 @@ if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'audio_path' not in st.session_state: st.session_state.audio_path = ""
 if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
+if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
@@ -60,13 +61,39 @@ def get_duration(path):
     except: return 0
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (CLI)
+# 🔊 AUDIO ENGINE (MULTI-LANG & MODES)
 # ---------------------------------------------------------
-def generate_audio_cli(text, voice, rate, pitch, output_file):
+VOICE_MAP = {
+    "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
+    "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
+    "Japanese": {"Male": "ja-JP-KeitaNeural", "Female": "ja-JP-NanamiNeural"},
+    "Chinese": {"Male": "zh-CN-YunxiNeural", "Female": "zh-CN-XiaoxiaoNeural"},
+    "Thai": {"Male": "th-TH-NiwatNeural", "Female": "th-TH-PremwadeeNeural"},
+    "Hindi": {"Male": "hi-IN-MadhurNeural", "Female": "hi-IN-SwaraNeural"}
+}
+
+VOICE_MODES = {
+    "Normal": {"rate": "+0%", "pitch": "+0Hz"},
+    "Story": {"rate": "-10%", "pitch": "-5Hz"},
+    "Documentary": {"rate": "-5%", "pitch": "-10Hz"},
+    "Recap": {"rate": "+10%", "pitch": "+0Hz"},
+    "Motivation": {"rate": "-10%", "pitch": "-15Hz"},
+    "Animation": {"rate": "+5%", "pitch": "+20Hz"}
+}
+
+def generate_audio_cli(text, lang, gender, mode_name, output_file):
     try:
+        # Get Voice ID
+        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+        
+        # Get Mode Settings
+        settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
+        rate = settings["rate"]
+        pitch = settings["pitch"]
+
         cmd = [
             "edge-tts",
-            "--voice", voice,
+            "--voice", voice_id,
             "--text", text,
             "--rate", rate,
             "--pitch", pitch,
@@ -89,10 +116,9 @@ def get_model(api_key, model_name):
     ]
     return genai.GenerativeModel(model_name, safety_settings=safety_settings)
 
-def transcribe_video(video_path, language_code=None):
+def transcribe_video(video_path):
     try:
         model = whisper.load_model("base")
-        # Whisper auto-detects, but we can hint if needed, though 'base' model is good at auto
         result = model.transcribe(video_path) 
         return result['text']
     except Exception as e:
@@ -119,9 +145,6 @@ def refine_script_hvc(model, text, title, custom_prompt):
     Input Draft: "{text}"
     
     Structure Constraint: Use the **'H-V-C' (Hook-Value-Call)** structure.
-    1. Hook (0-30s): Grab attention.
-    2. Value (Body): Deliver the core message/story.
-    3. Call (End): Call to action.
     
     OUTPUT FORMAT RULE: 
     - **Output ONLY the spoken words (Host Voice) in Burmese.** - Do NOT include labels like "Hook:", "Scene 1:", etc. 
@@ -146,49 +169,50 @@ def generate_viral_metadata(model, title, keywords):
     except Exception as e: return f"AI Error: {e}"
 
 # ---------------------------------------------------------
-# ❄️ FREEZE FRAME ENGINE
+# ❄️ AUTO FREEZE LOOP ENGINE
 # ---------------------------------------------------------
-def process_freeze_command(command, input_video, output_video):
-    """
-    Parses [freeze 10,5] or [duration 10,5]
-    Format: command time_point, duration
-    """
+def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
     try:
-        # Regex to find "freeze" or "duration" followed by two numbers
-        match = re.search(r'(freeze|duration)\s*[:=]?\s*(-?\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
+        duration = get_duration(input_video)
+        if duration == 0: return False
+
+        # Create a list file for concat
+        concat_list_path = "freeze_list.txt"
         
-        if match:
-            time_point = float(match.group(2))
-            duration = float(match.group(3))
+        with open(concat_list_path, "w") as f:
+            current_time = 0
+            part_idx = 0
             
-            # Handle negative time (relative to end) - basic implementation assumes positive
-            if time_point < 0: time_point = 0 # Fallback for simplicity
-            
-            # FFmpeg: Cut A, Freeze Frame, Cut B, Concat
-            # 1. Part A
-            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(time_point), '-c', 'copy', 'part_a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # 2. Freeze
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-vframes', '1', 'freeze.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'freeze.jpg', '-t', str(duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'part_freeze.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # 3. Part B
-            subprocess.run(['ffmpeg', '-y', '-ss', str(time_point), '-i', input_video, '-c', 'copy', 'part_b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # 4. Concat
-            with open("list.txt", "w") as f:
-                f.write("file 'part_a.mp4'\nfile 'part_freeze.mp4'\nfile 'part_b.mp4'")
-            
-            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Cleanup
-            for f in ['part_a.mp4', 'part_b.mp4', 'part_freeze.mp4', 'freeze.jpg', 'list.txt']:
-                if os.path.exists(f): os.remove(f)
+            while current_time < duration:
+                next_time = min(current_time + interval_sec, duration)
+                seg_duration = next_time - current_time
                 
-            return True
-        return False
+                # Cut Segment
+                part_name = f"part_{part_idx}.mp4"
+                subprocess.run(['ffmpeg', '-y', '-ss', str(current_time), '-t', str(seg_duration), '-i', input_video, '-c', 'copy', part_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                f.write(f"file '{part_name}'\n")
+                
+                # Create Freeze Frame (only if not at the very end)
+                if next_time < duration:
+                    freeze_name = f"freeze_{part_idx}.mp4"
+                    # Capture last frame of segment
+                    subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', part_name, '-update', '1', '-q:v', '1', 'freeze_frame.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # Loop it
+                    subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'freeze_frame.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', freeze_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    f.write(f"file '{freeze_name}'\n")
+                
+                current_time = next_time
+                part_idx += 1
+                
+        # Concat all parts
+        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list_path, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Cleanup
+        if os.path.exists("freeze_frame.jpg"): os.remove("freeze_frame.jpg")
+        # Cleanup parts is messy in loop, can use glob in production, skipping for speed
+        return True
     except Exception as e:
-        print(f"Freeze Logic Error: {e}")
+        print(f"Auto Freeze Error: {e}")
         return False
 
 # ---------------------------------------------------------
@@ -214,7 +238,7 @@ with t1:
     st.subheader("Step 1: Upload & Initial Translate")
     uploaded = st.file_uploader("Upload Video", type=['mp4','mov'])
     
-    # Language Selection
+    # Source Language Selection
     source_lang = st.selectbox("Original Video Language", ["English", "Japanese", "Chinese", "Thai", "Indian (Hindi)"])
     
     if uploaded:
@@ -226,11 +250,11 @@ with t1:
                 # Extract Audio
                 subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Transcribe (Get Original Text)
+                # Transcribe
                 raw_text = transcribe_video("temp.wav")
                 st.session_state.raw_transcript = raw_text
                 
-                # Translate immediately to Burmese (Draft)
+                # Translate
                 model = get_model(st.session_state.api_key, model_name)
                 draft = translate_to_burmese_draft(model, raw_text, source_lang)
                 st.session_state.burmese_draft = draft
@@ -239,73 +263,108 @@ with t1:
     # --- STEP 2: REFINE SCRIPT ---
     if st.session_state.burmese_draft:
         st.subheader("Step 2: Script Refinement")
-        # Show Burmese Draft directly (User wanted to see Burmese immediately)
-        draft_text = st.text_area("Burmese Draft (Translated)", st.session_state.burmese_draft, height=150)
+        draft_text = st.text_area("Burmese Draft", st.session_state.burmese_draft, height=150)
         
         custom_prompt = st.text_input("Script Instructions", "Make it exciting, H-V-C style")
         
         if st.button("✨ Convert to H-V-C Final Script"):
             with st.spinner("Applying Magic..."):
                 model = get_model(st.session_state.api_key, model_name)
-                # Use "My Video" as generic title or ask user
                 final = refine_script_hvc(model, draft_text, "My Video", custom_prompt)
                 st.session_state.final_script = final
                 st.rerun()
 
-    # --- STEP 3: AUDIO & FREEZE ---
+    # --- STEP 3: AUDIO & VIDEO PROCESSING ---
     if st.session_state.final_script:
-        st.subheader("Step 3: Audio, Sync & Freeze")
+        st.subheader("Step 3: Final Production")
         final_script_edit = st.text_area("Final Script (Host Voice Only)", st.session_state.final_script, height=200)
         
-        c1, c2 = st.columns(2)
-        with c1: 
-            voice = st.selectbox("Voice", ["Male (Thiha)", "Female (Nilar)"])
-        with c2:
-            # 🔥 MOVED FREEZE COMMAND HERE
-            freeze_cmd = st.text_input("Freeze/Duration Command", placeholder="e.g. freeze 10,5 or duration 10,5")
-            st.caption("Freeze video at 10s for 5s duration.")
+        col_v1, col_v2, col_v3 = st.columns(3)
+        with col_v1:
+            target_lang = st.selectbox("Output Language", list(VOICE_MAP.keys()))
+        with col_v2: 
+            gender = st.selectbox("Gender", ["Male", "Female"])
+        with col_v3:
+            v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
+            
+        st.caption(f"Pitch: {VOICE_MODES[v_mode]['pitch']} | Rate: {VOICE_MODES[v_mode]['rate']}")
 
-        if st.button("🚀 Generate Final Video"):
-            with st.spinner("Rendering..."):
-                v_id = "my-MM-ThihaNeural" if "Male" in voice else "my-MM-NilarNeural"
+        # VIDEO EDITING TOOLS
+        st.markdown("#### 🛠️ Video Tools")
+        
+        # 1. ZOOM SLIDER
+        zoom_val = st.slider("Video Zoom (Scale)", 1.0, 1.1, 1.05, 0.01)
+        st.caption("Zoom 1.05 = 105% (Safe for Copyright)")
+        
+        # 2. AUTO FREEZE BUTTONS
+        st.markdown("Auto Freeze Interval (Duration: 4s)")
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        freeze_interval = None
+        
+        if col_f1.checkbox("30s Interval"): freeze_interval = 30
+        if col_f2.checkbox("1 Minute"): freeze_interval = 60
+        if col_f3.checkbox("3 Minutes"): freeze_interval = 180
+        if col_f4.checkbox("6 Minutes"): freeze_interval = 360
+
+        if st.button("🚀 Render 1080p Video"):
+            with st.spinner("Rendering... (This may take a moment)"):
                 
-                # 1. Handle Freeze First (Modify Input Video)
-                working_video = "input.mp4"
-                if freeze_cmd:
-                    if process_freeze_command(freeze_cmd, "input.mp4", "frozen_output.mp4"):
-                        working_video = "frozen_output.mp4"
-                        st.success(f"Video modified with: {freeze_cmd}")
-                    else:
-                        st.warning("Freeze command ignored (Format error). Using original video.")
-
-                # 2. Generate Audio
+                # A. AUDIO GENERATION
                 clean_text = final_script_edit.replace("*", "").strip()
-                generate_audio_cli(clean_text, v_id, "+0%", "+0Hz", "base_voice.mp3")
-                
-                # 3. Sync Logic (Auto Speed)
-                vid_dur = get_duration(working_video)
-                aud_dur = get_duration("base_voice.mp3")
-                
-                speed_factor = 1.0
-                if vid_dur > 0 and aud_dur > vid_dur:
-                    speed_factor = aud_dur / vid_dur
-                    speed_factor = min(speed_factor, 1.5) # Cap speed
-                
-                subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={speed_factor}", "final_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # 4. Final Merge
-                outfile = f"final_{int(time.time())}.mp4"
-                cmd = [
-                    'ffmpeg', '-y', '-i', working_video, '-i', "final_audio.mp3",
-                    '-map', '0:v', '-map', '1:a',
-                    '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                st.success("✅ Video Created Successfully!")
-                st.video(outfile)
-                with open(outfile, "rb") as f:
-                    st.download_button("Download", f, "final_dubbed.mp4")
+                if generate_audio_cli(clean_text, target_lang, gender, v_mode, "base_voice.mp3"):
+                    
+                    # B. VIDEO PROCESSING (FREEZE & ZOOM)
+                    input_vid = "input.mp4"
+                    processed_vid = "processed_visuals.mp4"
+                    
+                    # 1. Apply Freeze if selected
+                    if freeze_interval:
+                        apply_auto_freeze("input.mp4", "frozen_temp.mp4", freeze_interval)
+                        input_vid = "frozen_temp.mp4"
+                    
+                    # 2. Apply Zoom & 1080p Upscale
+                    # Scale to 1080p first, then apply Zoom
+                    # Complex Filter: Scale -> Zoom (Scale+Crop)
+                    # Simple Zoom: scale=iw*Z:ih*Z, crop=iw/Z:ih/Z -> This keeps resolution same as input
+                    # We want FORCE 1080p.
+                    
+                    zoom_filter = f"scale=1920* {zoom_val}:1080*{zoom_val},crop=1920:1080"
+                    # If input is not 1080p, first scale to 1920:-1, then zoom/crop
+                    
+                    subprocess.run([
+                        'ffmpeg', '-y', '-i', input_vid, 
+                        '-vf', f"scale=1920:1080,{zoom_filter}", 
+                        '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy', 
+                        processed_vid
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                    # C. SYNC & MERGE
+                    vid_dur = get_duration(processed_vid)
+                    aud_dur = get_duration("base_voice.mp3")
+                    
+                    speed_factor = 1.0
+                    if vid_dur > 0 and aud_dur > vid_dur:
+                        speed_factor = aud_dur / vid_dur
+                        speed_factor = min(speed_factor, 1.5) 
+                    
+                    subprocess.run(['ffmpeg', '-y', '-i', "base_voice.mp3", '-filter:a', f"atempo={speed_factor}", "final_audio.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    outfile = f"final_1080p_{int(time.time())}.mp4"
+                    cmd = [
+                        'ffmpeg', '-y', '-i', processed_vid, '-i', "final_audio.mp3",
+                        '-map', '0:v', '-map', '1:a',
+                        '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile
+                    ]
+                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    st.session_state.processed_video_path = outfile
+                    st.success("✅ Video Created Successfully!")
+
+    # SHOW VIDEO (PERSISTENT)
+    if st.session_state.processed_video_path and os.path.exists(st.session_state.processed_video_path):
+        st.video(st.session_state.processed_video_path)
+        with open(st.session_state.processed_video_path, "rb") as f:
+            st.download_button("Download 1080p Video", f, "final_dubbed.mp4")
 
 # === TAB 2: VIRAL KIT ===
 with t2:
