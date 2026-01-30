@@ -255,7 +255,7 @@ with st.sidebar:
     api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
     st.divider()
-    model_name = st.selectbox("🤖 AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
+    model_name = st.selectbox("🤖 AI Model", ["gemini-2.0-flashlit", "gemini-2.5-flash"])
     if st.button("🔴 Reset System"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
