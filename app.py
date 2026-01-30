@@ -210,7 +210,7 @@ with st.sidebar:
     api_key = st.text_input("API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
     st.divider()
-    model_name = st.text_input("Model ID", value="gemini-1.5-flash")
+    model_name = st.text_input("Model ID", value="gemini-2.5-flash")
     if st.button("🔴 Reset"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
