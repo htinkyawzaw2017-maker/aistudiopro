@@ -271,7 +271,7 @@ with t1:
         if st.button("🚀 Render Final Video"):
             with st.spinner("Rendering..."):
                 # 1. AUDIO (Fixed Typo Here)
-                clean_text = final_text.replace("*", "").strip() # This matches the function call now
+                clean_text = final_text.replace("*", "").strip() # Fixed variable name
                 if generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3"):
                     st.session_state.processed_audio_path = "final_audio.mp3"
                     
@@ -281,7 +281,7 @@ with t1:
                     elif manual_freeze:
                         if process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"): input_vid = "frozen.mp4"
                     
-                    # 3. ZOOM & UPSCALE (Fixed Integer Issue)
+                    # 3. ZOOM & UPSCALE
                     w_s = int(1920 * zoom_val)
                     h_s = int(1080 * zoom_val)
                     if w_s % 2 != 0: w_s += 1
@@ -306,18 +306,18 @@ with t1:
                     st.session_state.processed_video_path = outfile
                     st.success("✅ Done!")
                 else:
-                    st.error("❌ Audio Failed. Check API Key or Text.")
+                    st.error("❌ Audio Generation Failed! (Empty text or API error)")
 
     if st.session_state.processed_video_path:
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
             with open(st.session_state.processed_video_path, "rb") as f:
-                st.download_button("🎬 Video", f, "video.mp4")
+                st.download_button("🎬 Download Video", f, "video.mp4")
         with c2:
             if st.session_state.processed_audio_path:
                 with open(st.session_state.processed_audio_path, "rb") as f:
-                    st.download_button("🎵 Audio", f, "audio.mp3")
+                    st.download_button("🎵 Download Audio", f, "audio.mp3")
         st.video(st.session_state.processed_video_path)
 
 with t2:
