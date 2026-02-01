@@ -65,6 +65,92 @@ def check_requirements():
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
         st.stop()
 
+# ---------------------------------------------------------
+# 🔢 BURMESE NUMBER CONVERTER (TEXT NORMALIZATION)
+# ---------------------------------------------------------
+def num_to_burmese_spoken(num_str):
+    """
+    Converts numbers like '10000' to 'တစ်သောင်း', '2500' to 'နှစ်ထောင့်ငါးရာ'.
+    Handles up to Millions (Thans).
+    """
+    try:
+        n = int(num_str)
+        if n == 0: return "သုည"
+        
+        # Burmese Numerals
+        digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
+        units = ["", "ဆယ်", "ရာ", "ထောင်", "သောင်း", "သိန်း", "သန်း", "ကုဋေ"]
+        
+        words = []
+        
+        # Handling Millions (Thans) and above logic is complex, 
+        # using a simplified robust logic for common video numbers (up to 999 Lakhs)
+        
+        if n >= 10000000: # 1 Crore + (Simple fallback for huge numbers)
+            return num_str # Fallback to digit reading for very large numbers
+            
+        # Logic for Millions/Lakhs/Thousands
+        if n >= 1000000: # Than (Million)
+            div = n // 1000000
+            rem = n % 1000000
+            if div > 0: words.append(digit_map[div] + "သန်း")
+            n = rem
+            
+        if n >= 100000: # Thein (100k)
+            div = n // 100000
+            rem = n % 100000
+            if div > 0: words.append(digit_map[div] + "သိန်း")
+            n = rem
+            
+        if n >= 10000: # Thaung (10k)
+            div = n // 10000
+            rem = n % 10000
+            if div > 0: words.append(digit_map[div] + "သောင်း")
+            n = rem
+            
+        if n >= 1000: # Htaung (1k)
+            div = n // 1000
+            rem = n % 1000
+            # Change tone "Htaung" to "Htaunt" if followed by numbers, simplified here
+            if div > 0: words.append(digit_map[div] + "ထောင်") 
+            n = rem
+            
+        if n >= 100: # Yar (100)
+            div = n // 100
+            rem = n % 100
+            if div > 0: words.append(digit_map[div] + "ရာ")
+            n = rem
+            
+        if n >= 10: # Sal (10)
+            div = n // 10
+            rem = n % 10
+            if div > 0: words.append(digit_map[div] + "ဆယ်")
+            n = rem
+            
+        if n > 0: # Unit
+            words.append(digit_map[n])
+            
+        result = "".join(words)
+        
+        # Tone adjustments (Creaky tone corrections for speech flow)
+        result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
+        # Fix trailing tone if it's the last word
+        if result.endswith("ထောင့်"): result = result[:-1] + "င်"
+        if result.endswith("ရာ့"): result = result[:-1]
+        if result.endswith("ဆယ့်"): result = result[:-1]
+        
+        return result
+    except:
+        return num_str
+
+def normalize_text_for_tts(text):
+    """
+    Finds all numbers in text and replaces them with Burmese spoken words.
+    Example: "ပိုက်ဆံ 10000 ရှိတယ်" -> "ပိုက်ဆံ တစ်သောင်း ရှိတယ်"
+    """
+    # Regex to find numbers
+    return re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
+
 def get_duration(path):
     try:
         cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
@@ -134,9 +220,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 # ---------------------------------------------------------
 # 🔊 AUDIO ENGINE (RESTORED FULL MODES)
 # ---------------------------------------------------------
+
+def generate_audio_cli(text, lang, gender, mode_name, output_file):
+    if not text or not text.strip(): return False, "Empty text"
+    
+    # 🔥 STEP 1: NORMALIZE NUMBERS (နံပါတ်များကို စာသားပြောင်းခြင်း)
+    # နံပါတ်များ (၁၀၀၀၀ -> တစ်သောင်း) ပြောင်းပြီးမှ အသံထုတ်ခိုင်းမည်
+    processed_text = normalize_text_for_tts(text)
+
+    try:
+        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+        settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
+        
+        # Use processed_text instead of raw text
+        cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={settings['rate']}", f"--pitch={settings['pitch']}", "--write-media", output_file]
+        
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0: return False, res.stderr
+        return True, "Success"
+    except Exception as e: return False, str(e)
+        
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
     "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
+    "Japanese": {"Male": "ja-JP-KeitaNeural", "Female": "ja-JP-NanamiNeural"},
+    "Chinese": {"Male": "zh-CN-YunxiNeural", "Female": "zh-CN-XiaoxiaoNeural"},
+    "Thai": {"Male": "th-TH-NiwatNeural", "Female": "th-TH-PremwadeeNeural"},
+    "Hindi": {"Male": "hi-IN-MadhurNeural", "Female": "hi-IN-SwaraNeural"}
 }
 
 # ✅ FULL VOICE MODES RESTORED
