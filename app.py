@@ -138,6 +138,8 @@ def num_to_burmese_spoken(num_str):
     except:
         return num_str
 
+
+
 def normalize_text_for_tts(text):
     """
     Finds all numbers in text and replaces them with Burmese spoken words.
