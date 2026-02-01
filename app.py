@@ -201,32 +201,60 @@ def refine_script_hvc(model, text, title, custom_prompt):
     try: return model.generate_content(prompt).text
     except: return "AI Error"
 
+# ---------------------------------------------------------
+# 🧠 AI PROMPT ENGINEERING (SPOKEN BURMESE FIX)
+# ---------------------------------------------------------
+
 def translate_to_burmese_draft(model, text, source_lang):
-    prompt = f"Translate {source_lang} to Burmese. Input: '{text}'. Rules: Keep Proper Nouns in English. Translate accurately."
+    # Prompt ကို စကားပြောပုံစံ (Spoken Style) ဖြစ်အောင် ပြင်ထားသည်
+    prompt = f"""
+    Act as a professional Myanmar Movie Recap Narrator.
+    Translate the following {source_lang} text into **Natural Spoken Burmese** (ဗမာစကားပြော).
+    
+    🔥🔥 CRITICAL RULES (Linguistic Constraints): 🔥🔥
+    1. **STRICTLY FORBIDDEN (မသုံးရ):** - ❌ 'သည်' (thee) -> Use 'တယ်' (tal) or 'ပါတယ်' (par-tal) instead.
+       - ❌ '၏' (ei) -> Use 'ရဲ့' (yae) instead.
+       - ❌ '၌' (nait) -> Use 'မှာ' (hmar) instead.
+       - ❌ '၎င်း' (la-gaung) -> Use 'ဒီ' (dee), 'သူ' (thu), 'အဲ့ဒီ' (ae-dee).
+       - ❌ 'မည့်' (myi) -> Use 'မယ့်' (mae).
+       - ❌ 'အဘယ်ကြောင့်ဆိုသော်' -> Use 'ဘာလို့လဲဆိုတော့'.
+       - ❌ 'ပြုလုပ်' -> Use 'လုပ်'.
+    
+    2. **STYLE:** - Write exactly as you would SPEAK to a friend.
+       - Use narrative flow (Storytelling style).
+       - Keep sentences short and punchy.
+    
+    Input Text: "{text}"
+    
+    Output: Only the Spoken Burmese text.
+    """
     try: return model.generate_content(prompt).text
     except: return "AI Error"
 
-def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
-    try:
-        duration = get_duration(input_video)
-        if duration == 0: return False
-        concat_list = "freeze_list.txt"
-        with open(concat_list, "w") as f:
-            curr = 0; idx = 0
-            while curr < duration:
-                nxt = min(curr + interval_sec, duration)
-                p_name = f"p_{idx}.mp4"
-                subprocess.run(['ffmpeg', '-y', '-ss', str(curr), '-t', str(nxt-curr), '-i', input_video, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                f.write(f"file '{p_name}'\n")
-                if nxt < duration:
-                    f_name = f"f_{idx}.mp4"
-                    subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', p_name, '-update', '1', '-q:v', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    f.write(f"file '{f_name}'\n")
-                curr = nxt; idx += 1
-        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except: return False
+def refine_script_hvc(model, text, title, custom_prompt):
+    # HVC ပြန်ရေးခိုင်းတဲ့အခါမှာလည်း စကားပြောပုံစံကို ထပ်မံအတည်ပြုခြင်း
+    prompt = f"""
+    Act as a famous Myanmar Movie Recap Content Creator (like "Spoiler Gyi").
+    Refine the following draft into a final script for a video titled '{title}'.
+    
+    Input Draft: "{text}"
+    
+    **STRUCTURE (H-V-C):**
+    1. Hook: Start with an exciting scene or question (0-10s).
+    2. Value: Tell the story engagingly.
+    3. Call: End with a subscribe request.
+    
+    **🔥🔥 TONE & STYLE RULES (MUST FOLLOW): 🔥🔥**
+    - **USE ONLY SPOKEN BURMESE (အပြောစကားသာသုံးပါ).**
+    - **ABSOLUTELY NO:** 'သည်', '၏', '၌', '၎င်း', 'ပြုလုပ်သည်'.
+    - **USE:** 'တယ်', 'မယ်', 'ရဲ့', 'မှာ', 'လုပ်လိုက်တယ်', 'သွားလိုက်တယ်'.
+    - Make it sound exciting, emotional, and dramatic.
+    - Example: Instead of "သူသည် သွား၏", write "သူချက်ချင်းပဲ ထွက်သွားလိုက်တော့တယ်".
+    
+    Additional Instructions: {custom_prompt}
+    """
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
 
 def process_freeze_command(command, input_video, output_video):
     try:
