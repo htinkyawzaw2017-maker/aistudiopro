@@ -53,6 +53,7 @@ if 'burmese_draft' not in st.session_state: st.session_state.burmese_draft = ""
 if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
+if 'processed_audio_path' not in st.session_state: st.session_state.processed_audio_path = None # Added for Audio Download
 if 'caption_video_path' not in st.session_state: st.session_state.caption_video_path = None
 if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 
@@ -81,30 +82,19 @@ def download_font():
         except: pass
     return os.path.abspath(font_filename)
 
-# ---------------------------------------------------------
-# 🛡️ WHISPER SAFE LOADER (ERROR FIXER)
-# ---------------------------------------------------------
 def load_whisper_safe():
-    """
-    Attempts to load the model. If Checksum error occurs (Corrupted file),
-    it deletes the cache and retries automatically.
-    """
     try:
         return whisper.load_model("base")
     except RuntimeError as e:
         if "checksum" in str(e).lower() or "mismatch" in str(e).lower():
-            st.warning("⚠️ Model file corrupted. Auto-fixing... (Downloading fresh copy)")
-            # Delete Whisper Cache
+            st.warning("⚠️ Fixing Model Corruption... Please wait.")
             cache_dir = os.path.expanduser("~/.cache/whisper")
-            if os.path.exists(cache_dir):
-                shutil.rmtree(cache_dir)
-            # Retry load
+            if os.path.exists(cache_dir): shutil.rmtree(cache_dir)
             return whisper.load_model("base")
-        else:
-            raise e
+        else: raise e
 
 # ---------------------------------------------------------
-# 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY STYLE)
+# 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY)
 # ---------------------------------------------------------
 def generate_ass_file(segments, font_path, font_size=20, margin_v=50):
     filename = "captions.ass"
@@ -136,21 +126,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start = seconds_to_ass(seg['start'])
             end = seconds_to_ass(seg['end'])
             raw_text = seg['text'].strip()
-            # Wrap text to avoid overflowing
             wrapped_lines = textwrap.wrap(raw_text, width=35)
             final_text = "\\N".join(wrapped_lines)
             f.write(f"Dialogue: 0,{start},{end},CapCut,,0,0,0,,{final_text}\n")
-            
     return filename
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE
+# 🔊 AUDIO ENGINE (RESTORED FULL MODES)
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
     "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
 }
-VOICE_MODES = {"Normal": {"rate": "+0%", "pitch": "+0Hz"}, "Story": {"rate": "-10%", "pitch": "-5Hz"}}
+
+# ✅ FULL VOICE MODES RESTORED
+VOICE_MODES = {
+    "Normal": {"rate": "+0%", "pitch": "+0Hz"},
+    "Story": {"rate": "-10%", "pitch": "-5Hz"},
+    "Documentary": {"rate": "-5%", "pitch": "-10Hz"},
+    "Recap": {"rate": "+10%", "pitch": "+0Hz"},
+    "Motivation": {"rate": "-15%", "pitch": "-10Hz"},
+    "Animation": {"rate": "+10%", "pitch": "+15Hz"}
+}
 
 def generate_audio_cli(text, lang, gender, mode_name, output_file):
     if not text.strip(): return False, "Empty text"
@@ -170,7 +167,6 @@ def get_model(api_key, model_name):
     return genai.GenerativeModel(model_name)
 
 def transcribe_video(video_path):
-    # 🔥 UPDATED TO USE SAFE LOADER
     try:
         model = load_whisper_safe()
         result = model.transcribe(video_path)
@@ -178,7 +174,6 @@ def transcribe_video(video_path):
     except Exception as e: return f"Error: {e}"
 
 def transcribe_for_captions(video_path):
-    # 🔥 UPDATED TO USE SAFE LOADER
     try:
         model = load_whisper_safe()
         result = model.transcribe(video_path, task="transcribe")
@@ -193,14 +188,7 @@ def translate_captions(model, segments):
         text = seg['text'].strip()
         if not text: continue
         try:
-            prompt = f"""
-            Translate to Burmese. Keep it short (max 10 words). Input: '{text}'
-            Rules:
-            1. Keep it short and concise (subtitle style).
-            2. Do not translate proper nouns.
-            3. Ensure meaning fits context.
-            Output: Only Burmese text.
-            """
+            prompt = f"Translate to Burmese. Keep it short (max 10 words). Input: '{text}'"
             res = model.generate_content(prompt)
             burmese_text = res.text.strip()
         except: burmese_text = text
@@ -208,9 +196,16 @@ def translate_captions(model, segments):
         time.sleep(0.3)
     return translated
 
-# ---------------------------------------------------------
-# ❄️ FREEZE & VIDEO HELPER
-# ---------------------------------------------------------
+def refine_script_hvc(model, text, title, custom_prompt):
+    prompt = f"Refine this Burmese draft for video '{title}'. Input: '{text}'. Structure: H-V-C. Constraint: Keep content length roughly same. Output: Only Burmese spoken text. Extra: {custom_prompt}"
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
+
+def translate_to_burmese_draft(model, text, source_lang):
+    prompt = f"Translate {source_lang} to Burmese. Input: '{text}'. Rules: Keep Proper Nouns in English. Translate accurately."
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
+
 def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
     try:
         duration = get_duration(input_video)
@@ -248,16 +243,6 @@ def process_freeze_command(command, input_video, output_video):
         return False
     except: return False
 
-def refine_script_hvc(model, text, title, custom_prompt):
-    prompt = f"Refine this Burmese draft for video '{title}'. Input: '{text}'. Structure: H-V-C. Constraint: Keep content length roughly same. Output: Only Burmese spoken text. Extra: {custom_prompt}"
-    try: return model.generate_content(prompt).text
-    except: return "AI Error"
-
-def translate_to_burmese_draft(model, text, source_lang):
-    prompt = f"Translate {source_lang} to Burmese. Input: '{text}'. Rules: Keep Proper Nouns in English. Translate accurately."
-    try: return model.generate_content(prompt).text
-    except: return "AI Error"
-
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
 # ---------------------------------------------------------
@@ -274,7 +259,6 @@ with st.sidebar:
 
 if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
-# --- TABS ---
 t1, t2, t3 = st.tabs(["🎙️ Dubbing Studio", "📝 Auto Caption (Overlay)", "🚀 Viral SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
@@ -314,6 +298,7 @@ with t1:
         c1, c2, c3 = st.columns(3)
         with c1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c2: gender = st.selectbox("Gender", ["Male", "Female"])
+        # ✅ VOICE MODES FULLY RESTORED IN UI
         with c3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         zoom_val = st.slider("Zoom", 1.0, 1.1, 1.05, 0.01)
         
@@ -329,6 +314,7 @@ with t1:
                 clean_text = final_text.replace("*", "").strip()
                 success, msg = generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3")
                 if success:
+                    st.session_state.processed_audio_path = "final_audio.mp3" # Save audio path
                     input_vid = "input.mp4"
                     if auto_freeze: apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze); input_vid = "frozen.mp4"
                     elif manual_freeze: process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"); input_vid = "frozen.mp4"
@@ -347,21 +333,24 @@ with t1:
                     st.session_state.processed_video_path = outfile; st.success("Done!")
                 else: st.error(msg)
     
+    # ✅ RESTORED AUDIO DOWNLOAD BUTTON
     if st.session_state.processed_video_path:
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("Download", f, "video.mp4")
+        st.video(st.session_state.processed_video_path)
+        d1, d2 = st.columns(2)
+        with d1:
+            with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "video.mp4")
+        with d2:
+            if st.session_state.processed_audio_path:
+                with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio Only", f, "audio.mp3")
 
 # === TAB 2: AUTO CAPTION (FIXED OVERLAY STYLE) ===
 with t2:
     st.subheader("📝 Auto Subtitle (Cover Original Text)")
-    st.caption("Auto-translates to Burmese, applies Yellow text on Opaque Black Box to hide original captions.")
-    
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     
     c_style1, c_style2 = st.columns(2)
-    with c_style1:
-        font_size = st.slider("Font Size (Adjust to fit)", 15, 60, 24, help="Smaller size helps prevent screen flooding")
-    with c_style2:
-        margin_v = st.slider("Vertical Position (Up/Down)", 10, 300, 50, help="Increase to move subtitles higher")
+    with c_style1: font_size = st.slider("Font Size", 15, 60, 24)
+    with c_style2: margin_v = st.slider("Position", 10, 300, 50)
 
     if cap_up:
         with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
@@ -374,14 +363,13 @@ with t2:
                 subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 segments = transcribe_for_captions("cap.wav")
             
-            with st.spinner("2. Translating (Natural Burmese)..."):
+            with st.spinner("2. Translating..."):
                 model = get_model(st.session_state.api_key, model_name)
                 trans_segments = translate_captions(model, segments)
             
-            with st.spinner("3. Applying Overlay Box..."):
+            with st.spinner("3. Applying Overlay..."):
                 ass_file = generate_ass_file(trans_segments, font_path, font_size, margin_v)
                 font_dir = os.path.dirname(font_path)
-                
                 subprocess.run([
                     'ffmpeg', '-y', '-i', "cap_input.mp4",
                     '-vf', f"ass={ass_file}:fontsdir={font_dir}",
@@ -397,7 +385,7 @@ with t2:
         with open(st.session_state.caption_video_path, "rb") as f:
             st.download_button("Download Video", f, "capcut_overlay.mp4")
 
-# === TAB 3: VIRAL SEO (RESTORED) ===
+# === TAB 3: VIRAL SEO ===
 with t3:
     st.subheader("Viral SEO Kit")
     title = st.text_input("Title")
