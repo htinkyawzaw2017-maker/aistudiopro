@@ -196,6 +196,49 @@ def translate_captions(model, segments):
         time.sleep(0.3)
     return translated
 
+
+# ---------------------------------------------------------
+# ❄️ FREEZE & VIDEO ENGINE (ဒီအပိုင်း ကျန်နေလို့ ထည့်ပေးပါ)
+# ---------------------------------------------------------
+def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
+    try:
+        duration = get_duration(input_video)
+        if duration == 0: return False
+        
+        concat_list = "freeze_list.txt"
+        with open(concat_list, "w") as f:
+            curr = 0; idx = 0
+            while curr < duration:
+                nxt = min(curr + interval_sec, duration)
+                p_name = f"p_{idx}.mp4"
+                subprocess.run(['ffmpeg', '-y', '-ss', str(curr), '-t', str(nxt-curr), '-i', input_video, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                f.write(f"file '{p_name}'\n")
+                
+                if nxt < duration:
+                    f_name = f"f_{idx}.mp4"
+                    subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', p_name, '-update', '1', '-q:v', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    f.write(f"file '{f_name}'\n")
+                curr = nxt; idx += 1
+        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except: return False
+
+def process_freeze_command(command, input_video, output_video):
+    try:
+        match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
+        if match:
+            t_pt = float(match.group(1)); dur = float(match.group(2))
+            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(t_pt), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(dur), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'fr.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open("list.txt", "w") as f: f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
+            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        return False
+    except: return False
+
 def refine_script_hvc(model, text, title, custom_prompt):
     prompt = f"Refine this Burmese draft for video '{title}'. Input: '{text}'. Structure: H-V-C. Constraint: Keep content length roughly same. Output: Only Burmese spoken text. Extra: {custom_prompt}"
     try: return model.generate_content(prompt).text
