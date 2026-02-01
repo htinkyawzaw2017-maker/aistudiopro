@@ -60,11 +60,6 @@ if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
-def check_requirements():
-    if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
-        st.stop()
-
 # ---------------------------------------------------------
 # 🔢 BURMESE NUMBER CONVERTER (TEXT NORMALIZATION)
 # ---------------------------------------------------------
@@ -178,6 +173,13 @@ def load_whisper_safe():
             if os.path.exists(cache_dir): shutil.rmtree(cache_dir)
             return whisper.load_model("base")
         else: raise e
+
+
+def check_requirements():
+    if shutil.which("ffmpeg") is None:
+        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
+        st.stop()
+
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY)
