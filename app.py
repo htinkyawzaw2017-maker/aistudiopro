@@ -72,7 +72,6 @@ def get_duration(path):
     except: return 0
 
 def download_font():
-    # Use Bold font for better visibility on overlays
     font_filename = "Padauk-Bold.ttf"
     if not os.path.exists(font_filename):
         url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
@@ -81,6 +80,28 @@ def download_font():
             with open(font_filename, 'wb') as f: f.write(r.content)
         except: pass
     return os.path.abspath(font_filename)
+
+# ---------------------------------------------------------
+# 🛡️ WHISPER SAFE LOADER (ERROR FIXER)
+# ---------------------------------------------------------
+def load_whisper_safe():
+    """
+    Attempts to load the model. If Checksum error occurs (Corrupted file),
+    it deletes the cache and retries automatically.
+    """
+    try:
+        return whisper.load_model("base")
+    except RuntimeError as e:
+        if "checksum" in str(e).lower() or "mismatch" in str(e).lower():
+            st.warning("⚠️ Model file corrupted. Auto-fixing... (Downloading fresh copy)")
+            # Delete Whisper Cache
+            cache_dir = os.path.expanduser("~/.cache/whisper")
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+            # Retry load
+            return whisper.load_model("base")
+        else:
+            raise e
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY STYLE)
@@ -96,13 +117,6 @@ def generate_ass_file(segments, font_path, font_size=20, margin_v=50):
         cs = int((seconds % 1) * 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    # Style Definition:
-    # Fontsize: Dynamic (User selected)
-    # PrimaryColour: &H0000FFFF (Yellow)
-    # BackColour: &H00000000 (Fully Opaque Black - To cover original text)
-    # BorderStyle: 3 (Opaque Box)
-    # MarginV: Dynamic (User selected - To position over original text)
-    
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1920
@@ -122,12 +136,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start = seconds_to_ass(seg['start'])
             end = seconds_to_ass(seg['end'])
             raw_text = seg['text'].strip()
-            
-            # Wrap text to avoid overflowing screen width
-            # Approx 35 chars is good for 1080p width with large font
+            # Wrap text to avoid overflowing
             wrapped_lines = textwrap.wrap(raw_text, width=35)
             final_text = "\\N".join(wrapped_lines)
-            
             f.write(f"Dialogue: 0,{start},{end},CapCut,,0,0,0,,{final_text}\n")
             
     return filename
@@ -159,14 +170,22 @@ def get_model(api_key, model_name):
     return genai.GenerativeModel(model_name)
 
 def transcribe_video(video_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(video_path)
-    return result['text']
+    # 🔥 UPDATED TO USE SAFE LOADER
+    try:
+        model = load_whisper_safe()
+        result = model.transcribe(video_path)
+        return result['text']
+    except Exception as e: return f"Error: {e}"
 
 def transcribe_for_captions(video_path):
-    model = whisper.load_model("base")
-    result = model.transcribe(video_path, task="transcribe")
-    return result['segments']
+    # 🔥 UPDATED TO USE SAFE LOADER
+    try:
+        model = load_whisper_safe()
+        result = model.transcribe(video_path, task="transcribe")
+        return result['segments']
+    except Exception as e: 
+        st.error(f"Whisper Error: {e}")
+        return []
 
 def translate_captions(model, segments):
     translated = []
@@ -174,15 +193,13 @@ def translate_captions(model, segments):
         text = seg['text'].strip()
         if not text: continue
         try:
-            # Enhanced prompt for accurate, short Burmese translation
             prompt = f"""
-            Translate this video subtitle to natural Burmese.
-            Input: "{text}"
+            Translate to Burmese. Keep it short (max 10 words). Input: '{text}'
             Rules:
             1. Keep it short and concise (subtitle style).
-            2. Do not translate proper nouns (names, places).
-            3. Ensure the meaning fits the timeline.
-            Output: Only the Burmese text.
+            2. Do not translate proper nouns.
+            3. Ensure meaning fits context.
+            Output: Only Burmese text.
             """
             res = model.generate_content(prompt)
             burmese_text = res.text.strip()
@@ -250,15 +267,14 @@ with st.sidebar:
     st.header("⚙️ Settings")
     api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
-    # ✅ RESTORED AI MODEL SELECTION
-    model_name = st.selectbox("AI Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"])
+    model_name = st.selectbox("AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
     if st.button("🔴 Reset"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
 if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
-# --- TABS (ALL 3 RESTORED) ---
+# --- TABS ---
 t1, t2, t3 = st.tabs(["🎙️ Dubbing Studio", "📝 Auto Caption (Overlay)", "🚀 Viral SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
@@ -341,12 +357,11 @@ with t2:
     
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     
-    # ✅ NEW CONTROLS FOR CAPTION ADJUSTMENT
     c_style1, c_style2 = st.columns(2)
     with c_style1:
-        font_size = st.slider("Font Size (Adjust to fit)", 15, 40, 20, help="Smaller size helps prevent screen flooding")
+        font_size = st.slider("Font Size (Adjust to fit)", 15, 60, 24, help="Smaller size helps prevent screen flooding")
     with c_style2:
-        margin_v = st.slider("Vertical Position (Up/Down)", 10, 200, 50, help="Increase to move subtitles higher")
+        margin_v = st.slider("Vertical Position (Up/Down)", 10, 300, 50, help="Increase to move subtitles higher")
 
     if cap_up:
         with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
@@ -364,7 +379,6 @@ with t2:
                 trans_segments = translate_captions(model, segments)
             
             with st.spinner("3. Applying Overlay Box..."):
-                # Pass user-selected size and position
                 ass_file = generate_ass_file(trans_segments, font_path, font_size, margin_v)
                 font_dir = os.path.dirname(font_path)
                 
