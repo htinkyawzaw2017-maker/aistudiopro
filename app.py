@@ -7,11 +7,9 @@ os.environ["GLOG_minloglevel"] = "2"
 import streamlit as st
 import google.generativeai as genai
 import edge_tts
-import asyncio
 import subprocess
 import shutil
 import whisper
-from pydub import AudioSegment
 import time
 import json
 import re
@@ -43,6 +41,7 @@ st.markdown("""
         border: 1px solid #333 !important; border-radius: 8px !important;
         font-family: 'Padauk', sans-serif !important;
     }
+    .viral-box { background: #0f0f0f; padding: 20px; border-left: 5px solid #00ff88; margin-top: 15px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -55,6 +54,7 @@ if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'api_key' not in st.session_state: st.session_state.api_key = ""
 if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
 if 'caption_video_path' not in st.session_state: st.session_state.caption_video_path = None
+if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
@@ -72,9 +72,9 @@ def get_duration(path):
     except: return 0
 
 def download_font():
+    # Use Bold font for better visibility on overlays
     font_filename = "Padauk-Bold.ttf"
     if not os.path.exists(font_filename):
-        # Use Bold font for better visibility
         url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
         try:
             r = requests.get(url, timeout=10)
@@ -83,18 +83,12 @@ def download_font():
     return os.path.abspath(font_filename)
 
 # ---------------------------------------------------------
-# 📝 .ASS SUBTITLE GENERATOR (CAPCUT STYLE ENGINE)
+# 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY STYLE)
 # ---------------------------------------------------------
-def generate_ass_file(segments, font_path):
-    """
-    Generates an Advanced Substation Alpha (.ass) file.
-    This allows precise control over Yellow Text and Black Box Background.
-    """
+def generate_ass_file(segments, font_path, font_size=20, margin_v=50):
     filename = "captions.ass"
     font_dir = os.path.dirname(font_path)
-    font_name = "Padauk" # Family name
-
-    # convert time to ASS format (H:MM:SS.cs)
+    
     def seconds_to_ass(seconds):
         h = int(seconds // 3600)
         m = int((seconds % 3600) // 60)
@@ -102,6 +96,13 @@ def generate_ass_file(segments, font_path):
         cs = int((seconds % 1) * 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
+    # Style Definition:
+    # Fontsize: Dynamic (User selected)
+    # PrimaryColour: &H0000FFFF (Yellow)
+    # BackColour: &H00000000 (Fully Opaque Black - To cover original text)
+    # BorderStyle: 3 (Opaque Box)
+    # MarginV: Dynamic (User selected - To position over original text)
+    
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1920
@@ -110,25 +111,24 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: CapCut,Padauk-Bold,60,&H0000FFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,3,0,0,2,10,10,50,1
+Style: CapCut,Padauk-Bold,{font_size},&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,3,0,0,2,10,10,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    # Color Codes in ASS are BGR (Blue Green Red). 
-    # Yellow = &H0000FFFF (00 Blue, FF Green, FF Red)
-    # BackColour = &H80000000 (80 is alpha/transparency, 000000 is black)
-    # BorderStyle = 3 (Opaque Box)
-
     with open(filename, "w", encoding="utf-8") as f:
         f.write(header)
         for seg in segments:
             start = seconds_to_ass(seg['start'])
             end = seconds_to_ass(seg['end'])
-            text = seg['text'].strip()
-            # Force line wrap if too long
-            text = "\\N".join(textwrap.wrap(text, width=30)) 
-            f.write(f"Dialogue: 0,{start},{end},CapCut,,0,0,0,,{text}\n")
+            raw_text = seg['text'].strip()
+            
+            # Wrap text to avoid overflowing screen width
+            # Approx 35 chars is good for 1080p width with large font
+            wrapped_lines = textwrap.wrap(raw_text, width=35)
+            final_text = "\\N".join(wrapped_lines)
+            
+            f.write(f"Dialogue: 0,{start},{end},CapCut,,0,0,0,,{final_text}\n")
             
     return filename
 
@@ -154,9 +154,9 @@ def generate_audio_cli(text, lang, gender, mode_name, output_file):
 # ---------------------------------------------------------
 # 🧠 AI ENGINE
 # ---------------------------------------------------------
-def get_model(api_key):
+def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel(model_name)
 
 def transcribe_video(video_path):
     model = whisper.load_model("base")
@@ -164,7 +164,7 @@ def transcribe_video(video_path):
     return result['text']
 
 def transcribe_for_captions(video_path):
-    model = whisper.load_model("base") # Use small or base for speed
+    model = whisper.load_model("base")
     result = model.transcribe(video_path, task="transcribe")
     return result['segments']
 
@@ -174,15 +174,72 @@ def translate_captions(model, segments):
         text = seg['text'].strip()
         if not text: continue
         try:
-            # Enforce shortness
-            prompt = f"Translate to Burmese. Keep it very short (max 8 words). Input: '{text}'"
+            # Enhanced prompt for accurate, short Burmese translation
+            prompt = f"""
+            Translate this video subtitle to natural Burmese.
+            Input: "{text}"
+            Rules:
+            1. Keep it short and concise (subtitle style).
+            2. Do not translate proper nouns (names, places).
+            3. Ensure the meaning fits the timeline.
+            Output: Only the Burmese text.
+            """
             res = model.generate_content(prompt)
             burmese_text = res.text.strip()
         except: burmese_text = text
-        
         translated.append({'start': seg['start'], 'end': seg['end'], 'text': burmese_text})
-        time.sleep(0.2) # Rate limit
+        time.sleep(0.3)
     return translated
+
+# ---------------------------------------------------------
+# ❄️ FREEZE & VIDEO HELPER
+# ---------------------------------------------------------
+def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
+    try:
+        duration = get_duration(input_video)
+        if duration == 0: return False
+        concat_list = "freeze_list.txt"
+        with open(concat_list, "w") as f:
+            curr = 0; idx = 0
+            while curr < duration:
+                nxt = min(curr + interval_sec, duration)
+                p_name = f"p_{idx}.mp4"
+                subprocess.run(['ffmpeg', '-y', '-ss', str(curr), '-t', str(nxt-curr), '-i', input_video, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                f.write(f"file '{p_name}'\n")
+                if nxt < duration:
+                    f_name = f"f_{idx}.mp4"
+                    subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', p_name, '-update', '1', '-q:v', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    f.write(f"file '{f_name}'\n")
+                curr = nxt; idx += 1
+        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except: return False
+
+def process_freeze_command(command, input_video, output_video):
+    try:
+        match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
+        if match:
+            t_pt = float(match.group(1)); dur = float(match.group(2))
+            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(t_pt), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(dur), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'fr.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with open("list.txt", "w") as f: f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
+            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        return False
+    except: return False
+
+def refine_script_hvc(model, text, title, custom_prompt):
+    prompt = f"Refine this Burmese draft for video '{title}'. Input: '{text}'. Structure: H-V-C. Constraint: Keep content length roughly same. Output: Only Burmese spoken text. Extra: {custom_prompt}"
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
+
+def translate_to_burmese_draft(model, text, source_lang):
+    prompt = f"Translate {source_lang} to Burmese. Input: '{text}'. Rules: Keep Proper Nouns in English. Translate accurately."
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
@@ -190,71 +247,125 @@ def translate_captions(model, segments):
 st.markdown("""<div class="main-header"><h1>🎬 Myanmar AI Studio Pro</h1></div>""", unsafe_allow_html=True)
 
 with st.sidebar:
+    st.header("⚙️ Settings")
     api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.api_key)
     if api_key: st.session_state.api_key = api_key
+    # ✅ RESTORED AI MODEL SELECTION
+    model_name = st.selectbox("AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
     if st.button("🔴 Reset"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
 if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
-t1, t2 = st.tabs(["🎙️ Dubbing", "📝 Auto Caption (CapCut Style)"])
+# --- TABS (ALL 3 RESTORED) ---
+t1, t2, t3 = st.tabs(["🎙️ Dubbing Studio", "📝 Auto Caption (Overlay)", "🚀 Viral SEO"])
 
-# === TAB 1: DUBBING (Simplified for brevity, fully functional) ===
+# === TAB 1: DUBBING STUDIO ===
 with t1:
-    st.subheader("Dubbing Studio")
+    st.subheader("1. Upload & Translate")
     uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
+    source_lang = st.selectbox("Original Lang", ["English", "Japanese", "Chinese", "Thai"], key="sl1")
+    
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
-        if st.button("Start Dubbing Workflow"):
+        if st.button("📝 Extract & Translate"):
             check_requirements()
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             raw = transcribe_video("temp.wav")
-            model = get_model(st.session_state.api_key)
-            # Direct translation for now
-            draft = model.generate_content(f"Translate to Burmese: {raw}").text
-            st.session_state.final_script = draft
+            st.session_state.raw_transcript = raw
+            model = get_model(st.session_state.api_key, model_name)
+            draft = translate_to_burmese_draft(model, raw, source_lang)
+            st.session_state.burmese_draft = draft
             st.rerun()
-            
-    if st.session_state.final_script:
-        txt = st.text_area("Script", st.session_state.final_script)
-        if st.button("Render Video"):
-            generate_audio_cli(txt, "Burmese", "Female", "Normal", "voice.mp3")
-            # Simple Merge
-            subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-i', "voice.mp3", '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-shortest', "final.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            st.session_state.processed_video_path = "final.mp4"
-            st.success("Done")
-            
-    if st.session_state.processed_video_path:
-        st.video(st.session_state.processed_video_path)
 
-# === TAB 2: AUTO CAPTION (FIXED) ===
+    if st.session_state.burmese_draft:
+        st.subheader("2. Scripting")
+        script_mode = st.radio("Style:", ["Direct Translation (Best for 10min)", "H-V-C Rewrite (Short/Creative)"])
+        draft_text = st.text_area("Draft", st.session_state.burmese_draft, height=200)
+        if st.button("Confirm Script"):
+            if "H-V-C" in script_mode:
+                with st.spinner("Refining..."):
+                    model = get_model(st.session_state.api_key, model_name)
+                    final = refine_script_hvc(model, draft_text, "Video", "Engaging")
+                    st.session_state.final_script = final
+            else: st.session_state.final_script = draft_text
+            st.rerun()
+
+    if st.session_state.final_script:
+        st.subheader("3. Production")
+        final_text = st.text_area("Final Script", st.session_state.final_script, height=200)
+        c1, c2, c3 = st.columns(3)
+        with c1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
+        with c2: gender = st.selectbox("Gender", ["Male", "Female"])
+        with c3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
+        zoom_val = st.slider("Zoom", 1.0, 1.1, 1.05, 0.01)
+        
+        ft1, ft2 = st.tabs(["Auto Freeze", "Manual Command"])
+        auto_freeze = None; manual_freeze = None
+        with ft1:
+            if st.checkbox("Every 30s"): auto_freeze = 30
+            if st.checkbox("Every 1m"): auto_freeze = 60
+        with ft2: manual_freeze = st.text_input("Command", placeholder="freeze 10,5")
+
+        if st.button("🚀 Render Final Video"):
+            with st.spinner("Rendering..."):
+                clean_text = final_text.replace("*", "").strip()
+                success, msg = generate_audio_cli(clean_text, target_lang, gender, v_mode, "final_audio.mp3")
+                if success:
+                    input_vid = "input.mp4"
+                    if auto_freeze: apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze); input_vid = "frozen.mp4"
+                    elif manual_freeze: process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"); input_vid = "frozen.mp4"
+                    
+                    w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
+                    if w_s % 2 != 0: w_s += 1
+                    if h_s % 2 != 0: h_s += 1
+                    subprocess.run(['ffmpeg', '-y', '-i', input_vid, '-vf', f"scale={w_s}:{h_s},crop=1920:1080", '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'copy', "proc.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    v_dur = get_duration("proc.mp4"); a_dur = get_duration("final_audio.mp3")
+                    speed = min(a_dur / v_dur, 1.5) if v_dur > 0 else 1.0
+                    subprocess.run(['ffmpeg', '-y', '-i', "final_audio.mp3", '-filter:a', f"atempo={speed}", "sync.mp3"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    outfile = f"final_{int(time.time())}.mp4"
+                    subprocess.run(['ffmpeg', '-y', '-i', "proc.mp4", '-i', "sync.mp3", '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-shortest', outfile], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    st.session_state.processed_video_path = outfile; st.success("Done!")
+                else: st.error(msg)
+    
+    if st.session_state.processed_video_path:
+        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("Download", f, "video.mp4")
+
+# === TAB 2: AUTO CAPTION (FIXED OVERLAY STYLE) ===
 with t2:
-    st.subheader("📝 CapCut Style Captions (Black Box + Yellow Text)")
+    st.subheader("📝 Auto Subtitle (Cover Original Text)")
+    st.caption("Auto-translates to Burmese, applies Yellow text on Opaque Black Box to hide original captions.")
+    
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     
+    # ✅ NEW CONTROLS FOR CAPTION ADJUSTMENT
+    c_style1, c_style2 = st.columns(2)
+    with c_style1:
+        font_size = st.slider("Font Size (Adjust to fit)", 15, 40, 20, help="Smaller size helps prevent screen flooding")
+    with c_style2:
+        margin_v = st.slider("Vertical Position (Up/Down)", 10, 200, 50, help="Increase to move subtitles higher")
+
     if cap_up:
         with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
         
-        if st.button("Generate Captions"):
+        if st.button("Generate Overlay Captions"):
             check_requirements()
-            font_path = download_font() # Ensure font exists
+            font_path = download_font()
             
-            with st.spinner("1. Transcribing (Whisper)..."):
+            with st.spinner("1. Transcribing..."):
                 subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 segments = transcribe_for_captions("cap.wav")
             
-            with st.spinner("2. Translating (Gemini)..."):
-                model = get_model(st.session_state.api_key)
+            with st.spinner("2. Translating (Natural Burmese)..."):
+                model = get_model(st.session_state.api_key, model_name)
                 trans_segments = translate_captions(model, segments)
             
-            with st.spinner("3. Applying CapCut Style..."):
-                # Generate .ass file
-                ass_file = generate_ass_file(trans_segments, font_path)
-                
-                # Burn subtitles using ASS filter
-                # We map fonts directory to current folder so ffmpeg finds Padauk-Bold.ttf
-                # font_path variable is absolute, so we can use that directory.
+            with st.spinner("3. Applying Overlay Box..."):
+                # Pass user-selected size and position
+                ass_file = generate_ass_file(trans_segments, font_path, font_size, margin_v)
                 font_dir = os.path.dirname(font_path)
                 
                 subprocess.run([
@@ -265,9 +376,25 @@ with t2:
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 st.session_state.caption_video_path = "captioned_final.mp4"
-                st.success("✅ Success! Check the styling below.")
+                st.success("✅ Success!")
 
     if st.session_state.caption_video_path:
         st.video(st.session_state.caption_video_path)
         with open(st.session_state.caption_video_path, "rb") as f:
-            st.download_button("Download Video", f, "capcut_style.mp4")
+            st.download_button("Download Video", f, "capcut_overlay.mp4")
+
+# === TAB 3: VIRAL SEO (RESTORED) ===
+with t3:
+    st.subheader("Viral SEO Kit")
+    title = st.text_input("Title")
+    keys = st.text_input("Keywords")
+    lang = st.selectbox("SEO Lang", ["Myanmar", "English", "Thai", "Chinese"])
+    
+    if st.button("Generate SEO Data"):
+        if not title: st.error("Please add a title")
+        else:
+            with st.spinner("Analyzing..."):
+                model = get_model(st.session_state.api_key, model_name)
+                prompt = f"Write viral SEO description for '{title}'. Language: {lang}. Keywords: {keys}. Include Hook, Bullet points, Tags."
+                res = model.generate_content(prompt).text
+                st.markdown(f"<div class='viral-box'>{res}</div>", unsafe_allow_html=True)
