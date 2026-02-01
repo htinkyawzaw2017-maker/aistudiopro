@@ -243,6 +243,30 @@ def generate_audio_cli(text, lang, gender, mode_name, output_file):
         if res.returncode != 0: return False, res.stderr
         return True, "Success"
     except Exception as e: return False, str(e)
+
+# ---------------------------------------------------------
+# 🔊 AUDIO ENGINE
+# ---------------------------------------------------------
+# ... (VOICE_MAP, VOICE_MODES codes...)
+
+def generate_audio_cli(text, lang, gender, mode_name, output_file):
+    if not text or not text.strip(): return False, "Empty text"
+    
+    # 🔥 အရေးကြီးဆုံး ပြင်ဆင်ချက် 🔥
+    # နံပါတ်များကို မြန်မာစာသား အရင်ပြောင်းပါ (ဥပမာ: 10000 -> တစ်သောင်း)
+    processed_text = normalize_text_for_tts(text)
+
+    try:
+        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+        settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
+        
+        # '--text' နေရာမှာ 'processed_text' ကို သုံးရပါမယ်
+        cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={settings['rate']}", f"--pitch={settings['pitch']}", "--write-media", output_file]
+        
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0: return False, res.stderr
+        return True, "Success"
+    except Exception as e: return False, str(e)
         
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
