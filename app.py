@@ -285,7 +285,7 @@ with st.sidebar:
         st.session_state.api_keys = []
     
     st.divider()
-    st.session_state.selected_model = st.selectbox("🤖 AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
+    st.session_state.selected_model = st.selectbox("🤖 AI Model", ["gemini-2.5-flash", "gemini-2.5-flashlite-exp"])
     
     if st.button("🔴 Reset System"):
         for key in st.session_state.keys(): del st.session_state[key]
