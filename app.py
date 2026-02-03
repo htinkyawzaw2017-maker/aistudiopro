@@ -65,74 +65,83 @@ if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 # ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     """
-    Converts numbers like '10000' to 'တစ်သောင်း', '2500' to 'နှစ်ထောင့်ငါးရာ'.
-    Handles up to Millions (Thans).
+    Advanced Burmese Number Converter.
+    23000 -> နှစ်သောင်းသုံးထောင်
+    60000 -> ခြောက်သောင်း
+    500000 -> ငါးသိန်း
     """
     try:
+        # Remove commas if any
+        num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
         
-        # Burmese Numerals
         digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
-        units = ["", "ဆယ်", "ရာ", "ထောင်", "သောင်း", "သိန်း", "သန်း", "ကုဋေ"]
         
-        words = []
+        # Recursive function to build the string
+        def convert_chunk(number):
+            parts = []
+            
+            # ကုဋေ (10,000,000)
+            if number >= 10000000:
+                chunk = number // 10000000
+                parts.append(convert_chunk(chunk) + "ကုဋေ")
+                number %= 10000000
+            
+            # သန်း (1,000,000) - 10 သိန်း
+            # Note: Sometimes 1 Million is spoken as 10 Thein, but broadly "Than"
+            if number >= 1000000:
+                chunk = number // 1000000
+                parts.append(digit_map[chunk] + "သန်း")
+                number %= 1000000
+                
+            # သိန်း (100,000)
+            if number >= 100000:
+                chunk = number // 100000
+                parts.append(digit_map[chunk] + "သိန်း")
+                number %= 100000
+                
+            # သောင်း (10,000)
+            if number >= 10000:
+                chunk = number // 10000
+                parts.append(digit_map[chunk] + "သောင်း")
+                number %= 10000
+                
+            # ထောင် (1,000)
+            if number >= 1000:
+                chunk = number // 1000
+                parts.append(digit_map[chunk] + "ထောင်")
+                number %= 1000
+                
+            # ရာ (100)
+            if number >= 100:
+                chunk = number // 100
+                parts.append(digit_map[chunk] + "ရာ")
+                number %= 100
+            
+            # ဆယ် (10)
+            if number >= 10:
+                chunk = number // 10
+                parts.append(digit_map[chunk] + "ဆယ်")
+                number %= 10
+                
+            # Unit (1-9)
+            if number > 0:
+                parts.append(digit_map[number])
+                
+            return "".join(parts)
+
+        result = convert_chunk(n)
         
-        # Handling Millions (Thans) and above logic is complex, 
-        # using a simplified robust logic for common video numbers (up to 999 Lakhs)
-        
-        if n >= 10000000: # 1 Crore + (Simple fallback for huge numbers)
-            return num_str # Fallback to digit reading for very large numbers
-            
-        # Logic for Millions/Lakhs/Thousands
-        if n >= 1000000: # Than (Million)
-            div = n // 1000000
-            rem = n % 1000000
-            if div > 0: words.append(digit_map[div] + "သန်း")
-            n = rem
-            
-        if n >= 100000: # Thein (100k)
-            div = n // 100000
-            rem = n % 100000
-            if div > 0: words.append(digit_map[div] + "သိန်း")
-            n = rem
-            
-        if n >= 10000: # Thaung (10k)
-            div = n // 10000
-            rem = n % 10000
-            if div > 0: words.append(digit_map[div] + "သောင်း")
-            n = rem
-            
-        if n >= 1000: # Htaung (1k)
-            div = n // 1000
-            rem = n % 1000
-            # Change tone "Htaung" to "Htaunt" if followed by numbers, simplified here
-            if div > 0: words.append(digit_map[div] + "ထောင်") 
-            n = rem
-            
-        if n >= 100: # Yar (100)
-            div = n // 100
-            rem = n % 100
-            if div > 0: words.append(digit_map[div] + "ရာ")
-            n = rem
-            
-        if n >= 10: # Sal (10)
-            div = n // 10
-            rem = n % 10
-            if div > 0: words.append(digit_map[div] + "ဆယ်")
-            n = rem
-            
-        if n > 0: # Unit
-            words.append(digit_map[n])
-            
-        result = "".join(words)
-        
-        # Tone adjustments (Creaky tone corrections for speech flow)
+        # Tone adjustments for smoother speech (Sandhi)
+        # ထောင် -> ထောင့် (if followed by text), ရာ -> ရာ့, ဆယ် -> ဆယ့်
+        # This is a basic mapping; complex Sandhi requires NLP but this works for TTS
         result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
-        # Fix trailing tone if it's the last word
+        
+        # Fix the last word tone (End of sentence shouldn't use creaky tone)
         if result.endswith("ထောင့်"): result = result[:-1] + "င်"
         if result.endswith("ရာ့"): result = result[:-1]
-        if result.endswith("ဆယ့်"): result = result[:-1]
+        if result.endswith("ဆယ့်"): result = result[:-1] # ဆယ့် -> ဆယ်
         
         return result
     except:
@@ -142,46 +151,24 @@ def num_to_burmese_spoken(num_str):
 
 def normalize_text_for_tts(text):
     """
-    Finds all numbers in text and replaces them with Burmese spoken words.
-    Example: "ပိုက်ဆံ 10000 ရှိတယ်" -> "ပိုက်ဆံ တစ်သောင်း ရှိတယ်"
+    1. Converts numbers to Burmese words.
+    2. Removes Markdown (*, #).
+    3. Removes Newlines to prevent audio pausing/glitching.
     """
-    # Regex to find numbers
-    return re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
-
-def get_duration(path):
-    try:
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        return float(json.loads(r.stdout)['format']['duration'])
-    except: return 0
-
-def download_font():
-    font_filename = "Padauk-Bold.ttf"
-    if not os.path.exists(font_filename):
-        url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
-        try:
-            r = requests.get(url, timeout=10)
-            with open(font_filename, 'wb') as f: f.write(r.content)
-        except: pass
-    return os.path.abspath(font_filename)
-
-def load_whisper_safe():
-    try:
-        return whisper.load_model("base")
-    except RuntimeError as e:
-        if "checksum" in str(e).lower() or "mismatch" in str(e).lower():
-            st.warning("⚠️ Fixing Model Corruption... Please wait.")
-            cache_dir = os.path.expanduser("~/.cache/whisper")
-            if os.path.exists(cache_dir): shutil.rmtree(cache_dir)
-            return whisper.load_model("base")
-        else: raise e
-
-
-def check_requirements():
-    if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
-        st.stop()
-
+    # 1. Clean Markdown
+    text = text.replace("*", "").replace("#", "").replace("- ", "")
+    
+    # 2. Convert Numbers
+    text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
+    
+    # 3. CRITICAL FIX: Replace newlines with space to prevent TTS pausing/volume drops
+    # စာပိုဒ်အကူးမှာ အသံထစ်တာ၊ တိုးသွားတာ ပျောက်စေရန်
+    text = text.replace("\n", " ")
+    
+    # 4. Remove extra spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE ENGINE (CAPCUT OVERLAY)
@@ -413,60 +400,41 @@ def translate_to_burmese_draft(model, text, source_lang):
     except: return "AI Error"
 
 def refine_script_hvc(model, text, title, custom_prompt):
-    # HVC ပြန်ရေးခိုင်းတဲ့အခါမှာလည်း စကားပြောပုံစံကို ထပ်မံအတည်ပြုခြင်း
     prompt = f"""
-    Act as a famous Myanmar Movie Recap Content Creator (like "Spoiler Gyi").
-    Refine the following draft into a final script for a video titled '{title}'.
+    Act as a Professional Video Scriptwriter for a Myanmar Audience.
+    Refine the following Burmese draft into a final script for a video titled '{title}'.
     
     Input Draft: "{text}"
     
-    **STRUCTURE (H-V-C):**
-    1. Hook: Start with an exciting scene or question (0-10s).
-    2. Value: Tell the story engagingly.
-    3. Call: End with a subscribe request.
+    Structure Constraint: Use the **'H-V-C' (Hook-Value-Call)** structure internally.
     
-    **🔥🔥 TONE & STYLE RULES (MUST FOLLOW): 🔥🔥**
-    - **USE ONLY SPOKEN BURMESE (အပြောစကားသာသုံးပါ).**
-    - **ABSOLUTELY NO:** 'သည်', '၏', '၌', '၎င်း', 'ပြုလုပ်သည်'.
-    - **USE:** 'တယ်', 'မယ်', 'ရဲ့', 'မှာ', 'လုပ်လိုက်တယ်', 'သွားလိုက်တယ်'.
-    - Make it sound exciting, emotional, and dramatic.
-    - Example: Instead of "သူသည် သွား၏", write "သူချက်ချင်းပဲ ထွက်သွားလိုက်တော့တယ်".
+    **CRITICAL OUTPUT RULES:**
+    1. **NO LABELS:** Do NOT write "Hook:", "Body:", "Introduction:", or any structural labels.
+    2. **HOST VOICE ONLY:** Output ONLY the words the host will speak.
+    3. **LENGTH:** Keep the content length roughly the same as the input draft (to match video timing).
+    4. **ENGLISH:** If there are English technical terms or names (e.g., "iPhone", "Sniper", "Engine"), KEEP them in English. Do not translate them phonetically unless necessary.
+    5. **TONE:** Engaging, clear, and natural Burmese spoken style.
     
     Additional Instructions: {custom_prompt}
     """
     try: return model.generate_content(prompt).text
     except: return "AI Error"
 
-def process_freeze_command(command, input_video, output_video):
-    try:
-        match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
-        if match:
-            t_pt = float(match.group(1)); dur = float(match.group(2))
-            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(t_pt), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(dur), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'fr.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            with open("list.txt", "w") as f: f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
-            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        return False
-    except: return False
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI
 # ---------------------------------------------------------
 st.markdown("""<div class="main-header"><h1>🎬 Myanmar AI Studio Pro</h1></div>""", unsafe_allow_html=True)
 
+# SIDEBAR CODE SECTION
 with st.sidebar:
     st.header("⚙️ Settings")
-    api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.api_key)
+    
+    # Secrets ထဲက Key ကို အရင်ရှာမယ်
+    default_key = st.secrets.get("GOOGLE_API_KEY", "")
+    
+    api_key = st.text_input("🔑 Google API Key", type="password", value=default_key)
     if api_key: st.session_state.api_key = api_key
-    model_name = st.selectbox("AI Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"])
-    if st.button("🔴 Reset"):
-        for key in st.session_state.keys(): del st.session_state[key]
-        st.rerun()
-
-if not st.session_state.api_key: st.warning("Enter API Key"); st.stop()
 
 t1, t2, t3 = st.tabs(["🎙️ Dubbing Studio", "📝 Auto Caption (Overlay)", "🚀 Viral SEO"])
 
