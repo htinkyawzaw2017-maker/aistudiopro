@@ -18,30 +18,66 @@ import textwrap
 import math
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP
+# 🎨 UI SETUP (CUSTOM CSS FOR HYPER-REALISM)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
+    /* 1. HIDE DEFAULT STREAMLIT NAVBAR & FOOTER */
+    .stApp > header {visibility: hidden;}
+    .stApp > footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
+    
+    /* 2. GLOBAL THEME */
     .stApp { background-color: #050505; color: #e0e0e0; }
+    
+    /* 3. STYLING TABS AS BOXES (BUTTONS) */
+    div[data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: transparent;
+    }
+    div[data-baseweb="tab"] {
+        background-color: #112240;
+        border-radius: 8px;
+        padding: 10px 20px;
+        color: #8892b0;
+        border: 1px solid #233554;
+        font-weight: bold;
+        flex-grow: 1; /* Full width boxes */
+        text-align: center;
+    }
+    div[data-baseweb="tab"]:hover {
+        background-color: #1a2f55;
+        color: white;
+        border-color: #64ffda;
+    }
+    div[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #00d2ff; /* Neon Blue Active */
+        color: black !important;
+        border-color: #00d2ff;
+        box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+    }
+    
+    /* 4. MAIN HEADER STYLE */
     .main-header {
         font-family: 'Helvetica Neue', sans-serif;
-        background: linear-gradient(90deg, #1CB5E0 0%, #000851 100%);
-        padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px;
+        background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        padding: 10px; text-align: center; margin-bottom: 20px;
+        font-size: 3rem; font-weight: 900;
+        text-shadow: 0px 0px 20px rgba(0,255,136,0.3);
     }
-    .main-header h1 { color: white; margin: 0; font-size: 2.5rem; font-weight: 700; }
-    .stButton>button {
-        background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
-        color: black; border: none; height: 50px; font-weight: bold; width: 100%;
-        border-radius: 12px; font-size: 16px;
+    
+    /* 5. INPUT FIELDS STYLE */
+    input[type="text"], input[type="password"], textarea { 
+        background-color: #0a192f !important; color: #64ffda !important; 
+        border: 1px solid #112240 !important; border-radius: 8px !important;
     }
-    textarea, input { 
-        background-color: #1a1a1a !important; color: #fff !important; 
-        border: 1px solid #333 !important; border-radius: 8px !important;
-        font-family: 'Padauk', sans-serif !important;
-    }
-    .info-box { background: #112240; padding: 15px; border-radius: 10px; border-left: 5px solid #00d2ff; margin: 10px 0; }
+    
+    /* 6. INFO BOX */
+    .info-box { background: #112240; padding: 15px; border-radius: 10px; border-left: 5px solid #00d2ff; margin: 10px 0; color: white;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -84,7 +120,6 @@ def load_whisper_safe():
     try: return whisper.load_model("base")
     except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
-# 🔥 CUSTOM KNOWLEDGE BASE LOADER
 def load_custom_dictionary():
     dict_file = "dictionary.txt"
     if os.path.exists(dict_file):
@@ -101,7 +136,6 @@ def num_to_burmese_spoken(num_str):
         n = int(num_str)
         if n == 0: return "သုည"
         digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
-        
         def convert_chunk(number):
             parts = []
             if number >= 10000000: parts.append(convert_chunk(number // 10000000) + "ကုဋေ"); number %= 10000000
@@ -113,7 +147,6 @@ def num_to_burmese_spoken(num_str):
             if number >= 10: parts.append(digit_map[number // 10] + "ဆယ်"); number %= 10
             if number > 0: parts.append(digit_map[number])
             return "".join(parts)
-
         result = convert_chunk(n)
         result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
         if result.endswith("ထောင့်"): result = result[:-1] + "င်"
@@ -126,7 +159,6 @@ def normalize_text_for_tts(text):
     if not text: return ""
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
     text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    # Flow Fixes
     text = text.replace("\n", " ")
     text = text.replace("...", " ")
     text = text.replace("၊", " ") 
@@ -142,13 +174,11 @@ def get_model(api_key, model_name):
 
 def generate_with_retry(prompt):
     keys = st.session_state.api_keys
+    # 🔥 AI MODEL SELECTION USAGE
     model_name = st.session_state.get("selected_model", "gemini-1.5-flash")
-    
-    # 🔥 INJECT CUSTOM KNOWLEDGE
     custom_rules = load_custom_dictionary()
     if custom_rules:
-        prompt = f"STRICTLY FOLLOW THESE CUSTOM RULES FROM USER DATABASE:\n{custom_rules}\n\nTASK:\n{prompt}"
-        
+        prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
     for i, key in enumerate(keys):
         try:
             model = get_model(key, model_name)
@@ -179,7 +209,6 @@ def generate_audio_cli(text, lang, gender, mode_name, output_file, speed_multipl
         base_rate = int(settings['rate'].replace('%', ''))
         slider_rate = int((speed_multiplier - 1.0) * 100)
         final_rate_str = f"{base_rate + slider_rate:+d}%"
-        
         cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={final_rate_str}", f"--pitch={settings['pitch']}", "--write-media", output_file]
         subprocess.run(cmd, stdout=subprocess.DEVNULL)
         return True, "Success"
@@ -193,7 +222,6 @@ def generate_ass_file(segments, font_path):
     def seconds_to_ass(seconds):
         h = int(seconds // 3600); m = int((seconds % 3600) // 60); s = int(seconds % 60); cs = int((seconds % 1) * 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1920
@@ -217,166 +245,152 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return filename
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI
+# 🖥️ MAIN UI & SIDEBAR (UPDATED)
 # ---------------------------------------------------------
-st.markdown("""<div class="main-header"><h1>🎬 Myanmar AI Studio Pro</h1></div>""", unsafe_allow_html=True)
+st.markdown("""<div class="main-header">🎬 Myanmar AI Studio Pro</div>""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ Settings")
-    try:
-        if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
-        elif "GOOGLE_API_KEY" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEY"]
-        else: default_keys = ""
-    except: default_keys = ""
+    st.header("⚙️ Control Panel")
     
-    api_key_input = st.text_area("🔑 API Keys (Comma separated)", value=default_keys, height=100)
-    if api_key_input:
-        st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        st.success(f"Active: {len(st.session_state.api_keys)} Keys")
-    else: st.session_state.api_keys = []
-    
-    # 🔥 DATA TRAINING UPLOAD
-    st.divider()
-    st.markdown("### 📚 AI Knowledge Base")
-    train_file = st.file_uploader("Upload 'dictionary.txt'", type=['txt'])
-    if train_file:
-        with open("dictionary.txt", "wb") as f: f.write(train_file.getbuffer())
-        st.success("AI Trained with your data!")
+    # 🔥 DROPDOWN MENU BAR (EXPANDER)
+    with st.expander("🔑 API & System Settings", expanded=True):
+        # 1. API KEY (HIDDEN PASSWORD MODE)
+        try:
+            if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
+            elif "GOOGLE_API_KEY" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEY"]
+            else: default_keys = ""
+        except: default_keys = ""
+        
+        api_key_input = st.text_input("API Keys (Comma separated)", value=default_keys, type="password", help="Enter multiple keys separated by comma for auto-rotation")
+        
+        if api_key_input:
+            st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
+            st.success(f"✅ {len(st.session_state.api_keys)} Keys Loaded")
+        else: st.session_state.api_keys = []
+        
+        st.divider()
+        
+        # 2. AI MODEL SELECTOR (INCLUDED 2.0 FLASH)
+        st.markdown("🤖 **Select AI Model:**")
+        st.session_state.selected_model = st.selectbox(
+            "Model Version",
+            ["gemini-2.5-flash", "gemini-2.0-flash-exp"],
+            index=0,
+            label_visibility="collapsed"
+        )
+        st.caption("Tip: Use '2.0-flash-exp' for better logic.")
 
-    if st.button("🔴 Reset System"):
+    # 3. KNOWLEDGE BASE
+    with st.expander("📚 Knowledge Base (Training)", expanded=False):
+        train_file = st.file_uploader("Upload 'dictionary.txt'", type=['txt'])
+        if train_file:
+            with open("dictionary.txt", "wb") as f: f.write(train_file.getbuffer())
+            st.success("Trained!")
+
+    if st.button("🔴 Reset System", use_container_width=True):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
-if not st.session_state.api_keys: st.warning("⚠️ Enter API Keys"); st.stop()
+if not st.session_state.api_keys: st.warning("⚠️ Enter API Keys in Settings"); st.stop()
 
-t1, t2, t3 = st.tabs(["🎙️ Dubbing", "📝 Auto Caption", "🚀 Viral SEO"])
+# 🔥 TABS AS BOXES (Buttons)
+t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
 with t1:
-    st.subheader("Dubbing Studio")
-    uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
-    source_lang = st.selectbox("Original Lang", ["English", "Japanese", "Chinese", "Thai"])
+    col_up, col_set = st.columns([2, 1])
+    with col_up:
+        uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
+    with col_set:
+        source_lang = st.selectbox("Original Lang", ["English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
         
-        # 🔥 PROGRESS BAR FOR EXTRACTION
-        if st.button("📝 Extract & Translate"):
+        if st.button("📝 Extract & Translate", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
-            
             p_bar.progress(20, text="🎤 Transcribing Audio...")
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
                 raw = model.transcribe("temp.wav")['text']
                 st.session_state.raw_transcript = raw
-                
                 p_bar.progress(60, text="🧠 AI Translating...")
                 prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
                 st.session_state.final_script = generate_with_retry(prompt)
-                
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
 
     if st.session_state.final_script:
-        st.subheader("Script & Production")
+        st.markdown("### 🎬 Script & Production")
         
-        # SKIP LOGIC & REFINEMENT
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
-            if st.button("✨ Refine: Storytelling Style"):
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            if st.button("✨ Refine: Storytelling Mode", use_container_width=True):
                 prompt = f"Rewrite as Storytelling/Recap Style. NO 'ဗျ/ရှင့်'. Input: {st.session_state.final_script}"
                 st.session_state.final_script = generate_with_retry(prompt)
                 st.rerun()
-        with col_opt2:
-            if st.button("↩️ Revert to Original"):
-                 # This would ideally load from a backup variable, simplified here to just re-translate
-                 pass 
+        with c_opt2:
+            if st.button("↩️ Reset Script", use_container_width=True): pass
 
-        txt = st.text_area("Script", st.session_state.final_script, height=200)
+        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
         
-        # 🔥 DURATION ESTIMATION
+        # Duration Est
         word_count = len(txt.split())
-        est_min = round(word_count / 250, 1) # Avg 250 words per min for Burmese
-        st.markdown(f"<div class='info-box'>⏱️ <b>Estimated Audio Duration:</b> ~{est_min} minutes (Based on text length)</div>", unsafe_allow_html=True)
+        est_min = round(word_count / 250, 1)
+        st.markdown(f"<div class='info-box'>⏱️ Est. Duration: ~{est_min} mins</div>", unsafe_allow_html=True)
         
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
-        audio_speed = st.slider("🔊 Audio Speed", 0.8, 1.5, 1.0, 0.05)
-        zoom_val = st.slider("🔍 Video Zoom", 1.0, 1.2, 1.0, 0.01)
         
-        # 🔥 FIXED FREEZE SETTINGS
-        c1, c2 = st.columns(2)
-        with c1:
-            ft1, ft2 = st.tabs(["Auto Freeze", "Manual"])
+        audio_speed = st.slider("🔊 Audio Speed", 0.8, 1.5, 1.0, 0.05)
+        zoom_val = st.slider("🔍 Copyright Zoom", 1.0, 1.2, 1.0, 0.01)
+        
+        with st.expander("❄️ Freeze Frame Settings"):
+            c1, c2 = st.columns(2)
             auto_freeze = None; manual_freeze = None
-            with ft1:
+            with c1:
                 if st.checkbox("Every 30s"): auto_freeze = 30
                 if st.checkbox("Every 60s"): auto_freeze = 60
-            with ft2: manual_freeze = st.text_input("Command", placeholder="freeze 10,3")
+            with c2: manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
         
-        if st.button("🚀 Render Dubbed Video"):
-            p_bar = st.progress(0, text="🚀 Starting Render Engine...")
+        if st.button("🚀 RENDER FINAL VIDEO", use_container_width=True):
+            p_bar = st.progress(0, text="🚀 Initializing Engine...")
             
-            # 1. GENERATE AUDIO
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
             st.session_state.processed_audio_path = "voice.mp3"
             
-            # 2. FREEZE LOGIC
-            p_bar.progress(50, text="❄️ Applying Video Freeze...")
+            p_bar.progress(50, text="❄️ Applying Visual Effects...")
             input_vid = "input.mp4"
-            
-            # 🔥 PRECISE FREEZE LOGIC
             if auto_freeze or manual_freeze:
                 freeze_pts = []
                 dur = get_duration(input_vid)
-                if auto_freeze:
-                    freeze_pts = [(t, 3) for t in range(auto_freeze, int(dur), auto_freeze)] # (time, duration)
+                if auto_freeze: freeze_pts = [(t, 3) for t in range(auto_freeze, int(dur), auto_freeze)]
                 elif manual_freeze:
                     match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', manual_freeze)
                     if match: freeze_pts = [(float(match.group(1)), float(match.group(2)))]
-
+                
                 if freeze_pts:
-                    # FFmpeg Filter Complex for Freeze
-                    filter_complex = ""
-                    prev_t = 0
-                    inputs = []
-                    
-                    # Split video into chunks and freeze frames
-                    cmd_gen = ['ffmpeg', '-y', '-i', input_vid]
-                    
-                    # This is a simplified concat approach for robustness
+                    # Freeze Logic Implementation
                     concat_file = "concat_list.txt"
+                    prev_t = 0
                     with open(concat_file, "w") as f:
                         for idx, (ft, fd) in enumerate(freeze_pts):
-                            # Chunk Before Freeze
-                            p_name = f"chunk_{idx}.mp4"
-                            subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-t', str(ft-prev_t), '-i', input_vid, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            f.write(f"file '{p_name}'\n")
-                            
-                            # Freeze Frame
-                            fr_name = f"freeze_{idx}.mp4"
-                            # Capture frame at split point
+                            subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-t', str(ft-prev_t), '-i', input_vid, '-c', 'copy', f"c_{idx}.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            f.write(f"file 'c_{idx}.mp4'\n")
                             subprocess.run(['ffmpeg', '-y', '-ss', str(ft), '-i', input_vid, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            # Loop frame EXACTLY for duration
-                            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(fd), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fr_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            f.write(f"file '{fr_name}'\n")
-                            
+                            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(fd), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f"fr_{idx}.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            f.write(f"file 'fr_{idx}.mp4'\n")
                             prev_t = ft
-                        
-                        # Remaining Chunk
-                        last_name = "chunk_final.mp4"
-                        subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-i', input_vid, '-c', 'copy', last_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        f.write(f"file '{last_name}'\n")
-                    
-                    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', 'frozen_merged.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    input_vid = "frozen_merged.mp4"
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-i', input_vid, '-c', 'copy', "c_end.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        f.write(f"file 'c_end.mp4'\n")
+                    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', 'frozen.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    input_vid = "frozen.mp4"
 
-            # 3. MERGE & SYNC
             p_bar.progress(80, text="🎬 Merging & Syncing...")
             w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
             if w_s % 2 != 0: w_s += 1
@@ -397,10 +411,10 @@ with t1:
         st.video(st.session_state.processed_video_path)
         c_d1, c_d2 = st.columns(2)
         with c_d1:
-            with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4")
+            with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
         with c_d2:
             if st.session_state.processed_audio_path and os.path.exists(st.session_state.processed_audio_path):
-                with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3")
+                with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
@@ -408,53 +422,43 @@ with t2:
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     if cap_up:
         with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
-        if st.button("Generate Captions"):
+        if st.button("Generate Captions", use_container_width=True):
             check_requirements(); font_path = download_font()
             p_bar = st.progress(0, text="Processing...")
-            
             p_bar.progress(30, text="🎤 Transcribing...")
             subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
-            
             if model:
                 segments = model.transcribe("cap.wav", task="transcribe")['segments']
                 trans_segments = []
                 total_seg = len(segments)
-                
                 for i, seg in enumerate(segments):
-                    p_bar.progress(30 + int((i/total_seg)*50), text=f"🧠 Translating Segment {i+1}/{total_seg}")
+                    p_bar.progress(30 + int((i/total_seg)*50), text=f"🧠 Translating {i+1}/{total_seg}")
                     txt = seg['text'].strip()
                     if txt:
                         burmese = generate_with_retry(f"Translate to Burmese. Short. Input: '{txt}'")
                         trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
                         time.sleep(0.3)
-                
                 p_bar.progress(90, text="✍️ Burning Subtitles...")
                 ass_file = generate_ass_file(trans_segments, font_path)
                 font_dir = os.path.dirname(font_path)
                 subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', "captioned_final.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 st.session_state.caption_video_path = "captioned_final.mp4"
                 p_bar.progress(100, text="Done!")
-                st.success("Done!")
 
     if st.session_state.caption_video_path:
         st.video(st.session_state.caption_video_path)
-        with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4")
+        with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4", use_container_width=True)
 
 # === TAB 3: VIRAL SEO ===
 with t3:
     st.subheader("🚀 Viral Kit SEO")
     if st.session_state.final_script:
-        if st.button("Generate SEO Metadata"):
-            with st.spinner("Generating Viral Titles & Tags..."):
-                prompt = f"""
-                Based on this script, generate:
-                1. 5 Viral Clickbait Titles (Burmese)
-                2. 10 High Traffic Hashtags
-                3. A short engaging YouTube Description
-                Input: {st.session_state.final_script}
-                """
+        if st.button("Generate Metadata", use_container_width=True):
+            with st.spinner("Analyzing..."):
+                prompt = f"""Based on: {st.session_state.final_script}\nGenerate:\n1. 5 Clickbait Titles (Burmese)\n2. 10 Hashtags\n3. Description"""
                 seo_result = generate_with_retry(prompt)
-                st.info(seo_result)
+                st.success("SEO Generated!")
+                st.code(seo_result, language="markdown")
     else:
-        st.warning("Please generate a script in Tab 1 first.")
+        st.info("Please generate a script in Tab 1 first.")
