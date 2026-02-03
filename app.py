@@ -195,11 +195,22 @@ def num_to_burmese_spoken(num_str):
 
 def normalize_text_for_tts(text):
     if not text: return ""
-    text = text.replace("*", "").replace("#", "").replace("- ", "")
+    # 1. Markdown & Symbols Cleaning
+    text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
+    
+    # 2. Number Conversion
     text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    text = text.replace("\n", " ") # Prevent pausing
+    
+    # 3. CRITICAL FLOW FIX:
+    # Remove Newlines and Ellipsis (...) to prevent pauses
+    text = text.replace("\n", " ")  # စာကြောင်းအကူး ရပ်တာဖျောက်မယ်
+    text = text.replace("...", " ") # အစက်များရင် ရပ်တတ်လို့ ဖျက်မယ်
+    text = text.replace("၊", " ")   # ပုဒ်ဖြတ်နေရာမှာ အသံမရပ်ဘဲ ဆက်သွားအောင် Space ပဲခြားမယ်
+    
+    # 4. Remove extra spaces
     text = re.sub(r'\s+', ' ', text).strip()
     return text
+
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE GENERATOR (CAPCUT STYLE)
@@ -252,6 +263,27 @@ def generate_with_retry(prompt):
             errors.append(f"Key {i+1}: {str(e)}")
             continue
     return f"AI Error: All keys failed. {errors}"
+
+def refine_script_hvc(model, text, title, custom_prompt):
+    prompt = f"""
+    Act as a professional Movie Recap Narrator (Myanmar Storyteller).
+    Rewrite the following text into a natural, engaging spoken script.
+
+    Input Text: "{text}"
+
+    **STRICT RULES (Do Not Ignore):**
+    1. **STYLE:** Storytelling Style (ဇာတ်လမ်းပြောပြနေသလို ရေးပါ)။
+    2. **FORBIDDEN WORDS:** Do NOT use '၍', 'သည်', '၏', '၎င်း', 'ကျနော်', 'ကျွန်တော်', 'ဆိုတာ', 'စာဖတ်သူ','ဗျ'。
+    3. **SENTENCE ENDING:** Use spoken endings like 'တယ်', 'မယ်', 'ပါ', 'နော်', '‌လေ'。
+    4. **FLOW:** Write as one continuous flow. Short, punchy sentences.
+    5. **CONTENT:** Keep only the main events. Don't explain too much. Just narrate what happens.
+    6. **Format:** Output ONLY the raw spoken Burmese text. No headers.
+
+    Example Tone: "ဒီကောင်လေးကတော့ တောထဲမှာ လမ်းပျောက်နေတာဗျ။ ရုတ်တရက် ရှေ့မှာ အကောင်ကြီး ပေါ်လာရော..."
+    """
+    try: return model.generate_content(prompt).text
+    except: return "AI Error"
+
 
 # ---------------------------------------------------------
 # 🔊 AUDIO ENGINE (VOICE SELECTION)
@@ -315,34 +347,59 @@ if not st.session_state.api_keys: st.warning("⚠️ Enter Keys"); st.stop()
 t1, t2 = st.tabs(["🎙️ Dubbing", "📝 Auto Caption"])
 
 # === TAB 1: DUBBING STUDIO ===
-with t1:
-    st.subheader("Dubbing Studio")
-    uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
-    source_lang = st.selectbox("Original Lang", ["English", "Japanese", "Chinese", "Thai"])
-    
-    if uploaded:
-        with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
-        if st.button("📝 Extract & Translate"):
-            check_requirements()
-            subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            model = load_whisper_safe()
-            if model:
-                raw = model.transcribe("temp.wav")['text']
-                st.session_state.raw_transcript = raw
-                prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
-                st.session_state.final_script = generate_with_retry(prompt)
-                st.rerun()
+        if st.button("🚀 Render Dubbed Video"):
+            with st.spinner("Rendering (Syncing Audio & Video)..."):
+                # 1. TTS Generation
+                generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3")
+                
+                # 2. Freeze Logic Selection
+                input_vid = "input.mp4"
+                if auto_freeze: apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze); input_vid = "frozen.mp4"
+                elif manual_freeze: process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"); input_vid = "frozen.mp4"
+                
+                # 3. SYNC LOGIC (Video အတိုင်း အသံထွက်အောင် ချိန်ခြင်း)
+                v_dur = get_duration(input_vid)
+                a_dur = get_duration("voice.mp3")
+                
+                # အသံက ဗီဒီယိုထက် ရှည်နေရင် -> အသံကို မြန်လိုက်မယ် (Maximum 1.5x ထိပဲ)
+                # အသံက ဗီဒီယိုထက် တိုနေရင် -> အသံကို နှေးမလား (သို့) မူရင်းအတိုင်းထားမလား (မူရင်းက ပိုကောင်းပါတယ်)
+                
+                atempo_filter = ""
+                if v_dur > 0 and a_dur > 0:
+                    speed_ratio = a_dur / v_dur
+                    # အသံက အရမ်းရှည်နေရင် (ဥပမာ Video 10s, Audio 15s -> Speed 1.5x)
+                    if speed_ratio > 1.0:
+                        # Limit speed to avoid chipmunk effect
+                        final_speed = min(speed_ratio, 2.0) 
+                        atempo_filter = f"-filter:a atempo={final_speed}"
+                
+                # 4. Merge Command with Sync
+                cmd_merge = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3"]
+                if atempo_filter:
+                    cmd_merge.extend(['-filter:a', f"atempo={final_speed}"])
+                
+                # -shortest မသုံးဘဲ Video အဆုံးထိယူမယ်
+                cmd_merge.extend(['-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"])
+                
+                subprocess.run(cmd_merge, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                st.session_state.processed_video_path = "dubbed_final.mp4"
+                st.session_state.processed_audio_path = "voice.mp3" # For download button
+                st.success("Rendering Complete!")
 
-    if st.session_state.final_script:
-        st.subheader("Script & Production")
-        if st.button("✨ Refine with H.V.C (Host Voice Only)"):
-            with st.spinner("Refining..."):
-                prompt = f"Refine into H-V-C. Output ONLY host spoken words. Input: {st.session_state.final_script}"
-                st.session_state.final_script = generate_with_retry(prompt)
-                st.rerun()
-
-        txt = st.text_area("Script", st.session_state.final_script, height=200)
+    if st.session_state.processed_video_path:
+        st.video(st.session_state.processed_video_path)
         
+        c_d1, c_d2 = st.columns(2)
+        with c_d1:
+            with open(st.session_state.processed_video_path, "rb") as f: 
+                st.download_button("🎬 Download Video", f, "dubbed.mp4")
+        with c_d2:
+            # 🔥 AUDIO DOWNLOAD BUTTON ADDED
+            if os.path.exists("voice.mp3"):
+                with open("voice.mp3", "rb") as f:
+                    st.download_button("🎵 Download Audio Only", f, "voice.mp3")
+
         # 🔥 VOICE SELECTION ADDED
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
@@ -363,36 +420,7 @@ with t1:
                 if st.checkbox("Every 1min (Freeze 4s)"): auto_freeze = 60
             with ft2: manual_freeze = st.text_input("Command", placeholder="freeze 10,5")
         
-        if st.button("🚀 Render Dubbed Video"):
-            with st.spinner("Rendering..."):
-                # 1. TTS with Mode
-                generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3")
-                
-                # 2. Freeze Logic
-                input_vid = "input.mp4"
-                if auto_freeze: apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze); input_vid = "frozen.mp4"
-                elif manual_freeze: process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"); input_vid = "frozen.mp4"
-                
-                # 3. Zoom & Merge
-                w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
-                if w_s % 2 != 0: w_s += 1
-                if h_s % 2 != 0: h_s += 1
-                
-                # Complex filter: Zoom -> Crop -> Merge Audio
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
-                    '-filter_complex', f"[0:v]scale={w_s}:{h_s},crop=1920:1080[vzoom]",
-                    '-map', '[vzoom]', '-map', '1:a',
-                    '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                st.session_state.processed_video_path = "dubbed_final.mp4"
-                st.success("Dubbing Complete!")
-
-    if st.session_state.processed_video_path:
-        st.video(st.session_state.processed_video_path)
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("Download", f, "dubbed.mp4")
-
+        
 # === TAB 2: AUTO CAPTION ===
 with t2:
     st.subheader("📝 CapCut Style Captions")
