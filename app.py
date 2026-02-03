@@ -60,6 +60,10 @@ if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
+
+            # ---------------------------------------------------------
+# 🛠️ HELPER FUNCTIONS
+# ---------------------------------------------------------
 def check_requirements():
     if shutil.which("ffmpeg") is None:
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
@@ -91,85 +95,58 @@ def num_to_burmese_spoken(num_str):
     Advanced Burmese Number Converter.
     23000 -> နှစ်သောင်းသုံးထောင်
     60000 -> ခြောက်သောင်း
-    500000 -> ငါးသိန်း
     """
     try:
-        # Remove commas if any
         num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
         
         digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
         
-        # Recursive function to build the string
         def convert_chunk(number):
             parts = []
-            
-            # ကုဋေ (10,000,000)
             if number >= 10000000:
                 chunk = number // 10000000
                 parts.append(convert_chunk(chunk) + "ကုဋေ")
                 number %= 10000000
-            
-            # သန်း (1,000,000) - 10 သိန်း
-            # Note: Sometimes 1 Million is spoken as 10 Thein, but broadly "Than"
             if number >= 1000000:
                 chunk = number // 1000000
                 parts.append(digit_map[chunk] + "သန်း")
                 number %= 1000000
-                
-            # သိန်း (100,000)
             if number >= 100000:
                 chunk = number // 100000
                 parts.append(digit_map[chunk] + "သိန်း")
                 number %= 100000
-                
-            # သောင်း (10,000)
             if number >= 10000:
                 chunk = number // 10000
                 parts.append(digit_map[chunk] + "သောင်း")
                 number %= 10000
-                
-            # ထောင် (1,000)
             if number >= 1000:
                 chunk = number // 1000
                 parts.append(digit_map[chunk] + "ထောင်")
                 number %= 1000
-                
-            # ရာ (100)
             if number >= 100:
                 chunk = number // 100
                 parts.append(digit_map[chunk] + "ရာ")
                 number %= 100
-            
-            # ဆယ် (10)
             if number >= 10:
                 chunk = number // 10
                 parts.append(digit_map[chunk] + "ဆယ်")
                 number %= 10
-                
-            # Unit (1-9)
             if number > 0:
                 parts.append(digit_map[number])
-                
             return "".join(parts)
 
         result = convert_chunk(n)
-        
-        # Tone adjustments for smoother speech (Sandhi)
-        # ထောင် -> ထောင့် (if followed by text), ရာ -> ရာ့, ဆယ် -> ဆယ့်
-        # This is a basic mapping; complex Sandhi requires NLP but this works for TTS
         result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
         
-        # Fix the last word tone (End of sentence shouldn't use creaky tone)
         if result.endswith("ထောင့်"): result = result[:-1] + "င်"
         if result.endswith("ရာ့"): result = result[:-1]
-        if result.endswith("ဆယ့်"): result = result[:-1] # ဆယ့် -> ဆယ်
+        if result.endswith("ဆယ့်"): result = result[:-1]
         
         return result
     except:
         return num_str
-
 
 
 def normalize_text_for_tts(text):
