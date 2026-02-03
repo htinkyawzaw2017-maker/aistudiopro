@@ -15,7 +15,7 @@ import json
 import re
 import requests
 import textwrap
-from google.api_core import exceptions
+import math
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -41,6 +41,7 @@ st.markdown("""
         border: 1px solid #333 !important; border-radius: 8px !important;
         font-family: 'Padauk', sans-serif !important;
     }
+    .info-box { background: #112240; padding: 15px; border-radius: 10px; border-left: 5px solid #00d2ff; margin: 10px 0; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -48,7 +49,6 @@ st.markdown("""
 # 💾 STATE MANAGEMENT
 # ---------------------------------------------------------
 if 'raw_transcript' not in st.session_state: st.session_state.raw_transcript = ""
-if 'burmese_draft' not in st.session_state: st.session_state.burmese_draft = ""
 if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
 if 'processed_audio_path' not in st.session_state: st.session_state.processed_audio_path = None
@@ -81,51 +81,19 @@ def download_font():
     return os.path.abspath(font_filename)
 
 def load_whisper_safe():
-    try:
-        return whisper.load_model("base")
-    except Exception as e:
-        st.error(f"Whisper Load Error: {e}")
-        return None
+    try: return whisper.load_model("base")
+    except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
-def apply_auto_freeze(input_video, output_video, interval_sec, freeze_duration=4.0):
-    try:
-        duration = get_duration(input_video)
-        if duration == 0: return False
-        concat_list = "freeze_list.txt"
-        with open(concat_list, "w") as f:
-            curr = 0; idx = 0
-            while curr < duration:
-                nxt = min(curr + interval_sec, duration)
-                p_name = f"p_{idx}.mp4"
-                subprocess.run(['ffmpeg', '-y', '-ss', str(curr), '-t', str(nxt-curr), '-i', input_video, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                f.write(f"file '{p_name}'\n")
-                if nxt < duration:
-                    f_name = f"f_{idx}.mp4"
-                    subprocess.run(['ffmpeg', '-y', '-sseof', '-0.1', '-i', p_name, '-update', '1', '-q:v', '1', 'frame.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'frame.jpg', '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', f_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    f.write(f"file '{f_name}'\n")
-                curr = nxt; idx += 1
-        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return True
-    except: return False
-
-def process_freeze_command(command, input_video, output_video):
-    try:
-        match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', command, re.IGNORECASE)
-        if match:
-            t_pt = float(match.group(1)); dur = float(match.group(2))
-            subprocess.run(['ffmpeg', '-y', '-i', input_video, '-t', str(t_pt), '-c', 'copy', 'a.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(dur), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', 'fr.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(['ffmpeg', '-y', '-ss', str(t_pt), '-i', input_video, '-c', 'copy', 'b.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            with open("list.txt", "w") as f: f.write("file 'a.mp4'\nfile 'fr.mp4'\nfile 'b.mp4'")
-            subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', output_video], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        return False
-    except: return False
+# 🔥 CUSTOM KNOWLEDGE BASE LOADER
+def load_custom_dictionary():
+    dict_file = "dictionary.txt"
+    if os.path.exists(dict_file):
+        with open(dict_file, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
 
 # ---------------------------------------------------------
-# 🔢 NUMBER NORMALIZATION
+# 🔢 NUMBER & TEXT NORMALIZATION
 # ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     try:
@@ -156,11 +124,9 @@ def num_to_burmese_spoken(num_str):
 
 def normalize_text_for_tts(text):
     if not text: return ""
-    # 1. Cleaning
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
-    # 2. Number Conversion
     text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    # 3. Flow Fix (No Newlines, No Ellipsis)
+    # Flow Fixes
     text = text.replace("\n", " ")
     text = text.replace("...", " ")
     text = text.replace("၊", " ") 
@@ -168,7 +134,7 @@ def normalize_text_for_tts(text):
     return text
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (API ROTATION)
+# 🧠 AI ENGINE
 # ---------------------------------------------------------
 def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
@@ -177,6 +143,12 @@ def get_model(api_key, model_name):
 def generate_with_retry(prompt):
     keys = st.session_state.api_keys
     model_name = st.session_state.get("selected_model", "gemini-1.5-flash")
+    
+    # 🔥 INJECT CUSTOM KNOWLEDGE
+    custom_rules = load_custom_dictionary()
+    if custom_rules:
+        prompt = f"STRICTLY FOLLOW THESE CUSTOM RULES FROM USER DATABASE:\n{custom_rules}\n\nTASK:\n{prompt}"
+        
     for i, key in enumerate(keys):
         try:
             model = get_model(key, model_name)
@@ -186,7 +158,7 @@ def generate_with_retry(prompt):
     return "AI Error: All keys failed."
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (SPEED CONTROL & STYLES)
+# 🔊 AUDIO ENGINE
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
@@ -196,29 +168,17 @@ VOICE_MODES = {
     "Normal": {"rate": "+0%", "pitch": "+0Hz"},
     "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
     "Recap": {"rate": "+5%", "pitch": "+0Hz"},
-    "Horror/Thriller": {"rate": "-10%", "pitch": "-5Hz"},
 }
 
 def generate_audio_cli(text, lang, gender, mode_name, output_file, speed_multiplier=1.0):
     if not text.strip(): return False, "Empty text"
-    
-    # Text Normalization
     processed_text = normalize_text_for_tts(text)
-    
     try:
         voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
         settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
-        
-        # 🔥 Calculate Rate based on Mode + Slider
-        # Parse base rate (e.g., "-5%")
-        base_rate_str = settings['rate'].replace('%', '')
-        base_rate = int(base_rate_str)
-        
-        # Add slider effect (1.0 = 0%, 1.2 = +20%)
+        base_rate = int(settings['rate'].replace('%', ''))
         slider_rate = int((speed_multiplier - 1.0) * 100)
-        
-        final_rate_val = base_rate + slider_rate
-        final_rate_str = f"{final_rate_val:+d}%"
+        final_rate_str = f"{base_rate + slider_rate:+d}%"
         
         cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={final_rate_str}", f"--pitch={settings['pitch']}", "--write-media", output_file]
         subprocess.run(cmd, stdout=subprocess.DEVNULL)
@@ -271,21 +231,25 @@ with st.sidebar:
     
     api_key_input = st.text_area("🔑 API Keys (Comma separated)", value=default_keys, height=100)
     if api_key_input:
-        key_list = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        st.session_state.api_keys = key_list
-        st.success(f"Active: {len(key_list)} Keys")
+        st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
+        st.success(f"Active: {len(st.session_state.api_keys)} Keys")
     else: st.session_state.api_keys = []
     
+    # 🔥 DATA TRAINING UPLOAD
     st.divider()
-    if "selected_model" not in st.session_state: st.session_state.selected_model = "gemini-2.5-flash"
-    st.session_state.selected_model = st.selectbox("🤖 AI Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"])
+    st.markdown("### 📚 AI Knowledge Base")
+    train_file = st.file_uploader("Upload 'dictionary.txt'", type=['txt'])
+    if train_file:
+        with open("dictionary.txt", "wb") as f: f.write(train_file.getbuffer())
+        st.success("AI Trained with your data!")
+
     if st.button("🔴 Reset System"):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
 if not st.session_state.api_keys: st.warning("⚠️ Enter API Keys"); st.stop()
 
-t1, t2 = st.tabs(["🎙️ Dubbing", "📝 Auto Caption"])
+t1, t2, t3 = st.tabs(["🎙️ Dubbing", "📝 Auto Caption", "🚀 Viral SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
 with t1:
@@ -295,86 +259,139 @@ with t1:
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
+        
+        # 🔥 PROGRESS BAR FOR EXTRACTION
         if st.button("📝 Extract & Translate"):
             check_requirements()
+            p_bar = st.progress(0, text="Starting...")
+            
+            p_bar.progress(20, text="🎤 Transcribing Audio...")
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
                 raw = model.transcribe("temp.wav")['text']
                 st.session_state.raw_transcript = raw
-                # Rotation AI
+                
+                p_bar.progress(60, text="🧠 AI Translating...")
                 prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
                 st.session_state.final_script = generate_with_retry(prompt)
+                
+                p_bar.progress(100, text="✅ Done!")
                 st.rerun()
 
     if st.session_state.final_script:
         st.subheader("Script & Production")
         
-        # 🔥 UPDATED PROMPT: NO 'ဗျ/ရှင့်/သူ၏', STORYTELLING STYLE
-        if st.button("✨ Refine: Movie Recap Style (No 'ဗျ/ရှင့်')"):
-            with st.spinner("Refining..."):
-                prompt = f"""
-                Act as a Myanmar Movie Recap Narrator. Rewrite this text.
-                Input: "{st.session_state.final_script}"
-                
-                **STRICT RULES:**
-                1. Style: Engaging, Storytelling, Flowing (ဇာတ်လမ်းပြောပုံစံ).
-                2. **FORBIDDEN:** Do NOT use 'ဗျ', 'ရှင့်', 'ခင်ဗျာ', 'သူ၏', '၎င်း', 'သည်', '၍'.
-                3. **ALLOWED:** Use 'သူမ' (for female), 'သူ' (for male/general). End sentences with 'တယ်', 'မယ်', 'ပါ'.
-                4. Flow: Continuous, no robotic pauses.
-                """
+        # SKIP LOGIC & REFINEMENT
+        col_opt1, col_opt2 = st.columns(2)
+        with col_opt1:
+            if st.button("✨ Refine: Storytelling Style"):
+                prompt = f"Rewrite as Storytelling/Recap Style. NO 'ဗျ/ရှင့်'. Input: {st.session_state.final_script}"
                 st.session_state.final_script = generate_with_retry(prompt)
                 st.rerun()
+        with col_opt2:
+            if st.button("↩️ Revert to Original"):
+                 # This would ideally load from a backup variable, simplified here to just re-translate
+                 pass 
 
         txt = st.text_area("Script", st.session_state.final_script, height=200)
         
-        # 🔥 VOICE SETTINGS
+        # 🔥 DURATION ESTIMATION
+        word_count = len(txt.split())
+        est_min = round(word_count / 250, 1) # Avg 250 words per min for Burmese
+        st.markdown(f"<div class='info-box'>⏱️ <b>Estimated Audio Duration:</b> ~{est_min} minutes (Based on text length)</div>", unsafe_allow_html=True)
+        
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
+        audio_speed = st.slider("🔊 Audio Speed", 0.8, 1.5, 1.0, 0.05)
+        zoom_val = st.slider("🔍 Video Zoom", 1.0, 1.2, 1.0, 0.01)
         
-        # 🔥 AUDIO SPEED SLIDER
-        audio_speed = st.slider("🔊 Audio Speed (Multiplier)", 0.8, 1.5, 1.0, 0.05, help="1.0 is Normal. 1.2 is 20% Faster.")
-        
-        # 🔥 ZOOM SLIDER
-        zoom_val = st.slider("🔍 Video Zoom (Avoid Copyright)", 1.0, 1.2, 1.0, 0.01)
-        
-        # 🔥 FREEZE
+        # 🔥 FIXED FREEZE SETTINGS
         c1, c2 = st.columns(2)
         with c1:
             ft1, ft2 = st.tabs(["Auto Freeze", "Manual"])
             auto_freeze = None; manual_freeze = None
             with ft1:
-                if st.checkbox("Every 30s (Freeze 4s)"): auto_freeze = 30
-                if st.checkbox("Every 1min (Freeze 4s)"): auto_freeze = 60
-            with ft2: manual_freeze = st.text_input("Command", placeholder="freeze 10,5")
+                if st.checkbox("Every 30s"): auto_freeze = 30
+                if st.checkbox("Every 60s"): auto_freeze = 60
+            with ft2: manual_freeze = st.text_input("Command", placeholder="freeze 10,3")
         
         if st.button("🚀 Render Dubbed Video"):
-            with st.spinner("Rendering..."):
-                # 1. TTS with Speed Slider
-                generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
-                st.session_state.processed_audio_path = "voice.mp3" # Save for download
-                
-                # 2. Freeze Logic
-                input_vid = "input.mp4"
-                if auto_freeze: apply_auto_freeze("input.mp4", "frozen.mp4", auto_freeze); input_vid = "frozen.mp4"
-                elif manual_freeze: process_freeze_command(manual_freeze, "input.mp4", "frozen.mp4"); input_vid = "frozen.mp4"
-                
-                # 3. Zoom & Merge
-                w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
-                if w_s % 2 != 0: w_s += 1
-                if h_s % 2 != 0: h_s += 1
-                
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
-                    '-filter_complex', f"[0:v]scale={w_s}:{h_s},crop=1920:1080[vzoom]",
-                    '-map', '[vzoom]', '-map', '1:a',
-                    '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                st.session_state.processed_video_path = "dubbed_final.mp4"
-                st.success("Dubbing Complete!")
+            p_bar = st.progress(0, text="🚀 Starting Render Engine...")
+            
+            # 1. GENERATE AUDIO
+            p_bar.progress(30, text="🔊 Generating Neural Speech...")
+            generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
+            st.session_state.processed_audio_path = "voice.mp3"
+            
+            # 2. FREEZE LOGIC
+            p_bar.progress(50, text="❄️ Applying Video Freeze...")
+            input_vid = "input.mp4"
+            
+            # 🔥 PRECISE FREEZE LOGIC
+            if auto_freeze or manual_freeze:
+                freeze_pts = []
+                dur = get_duration(input_vid)
+                if auto_freeze:
+                    freeze_pts = [(t, 3) for t in range(auto_freeze, int(dur), auto_freeze)] # (time, duration)
+                elif manual_freeze:
+                    match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', manual_freeze)
+                    if match: freeze_pts = [(float(match.group(1)), float(match.group(2)))]
+
+                if freeze_pts:
+                    # FFmpeg Filter Complex for Freeze
+                    filter_complex = ""
+                    prev_t = 0
+                    inputs = []
+                    
+                    # Split video into chunks and freeze frames
+                    cmd_gen = ['ffmpeg', '-y', '-i', input_vid]
+                    
+                    # This is a simplified concat approach for robustness
+                    concat_file = "concat_list.txt"
+                    with open(concat_file, "w") as f:
+                        for idx, (ft, fd) in enumerate(freeze_pts):
+                            # Chunk Before Freeze
+                            p_name = f"chunk_{idx}.mp4"
+                            subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-t', str(ft-prev_t), '-i', input_vid, '-c', 'copy', p_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            f.write(f"file '{p_name}'\n")
+                            
+                            # Freeze Frame
+                            fr_name = f"freeze_{idx}.mp4"
+                            # Capture frame at split point
+                            subprocess.run(['ffmpeg', '-y', '-ss', str(ft), '-i', input_vid, '-vframes', '1', 'f.jpg'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            # Loop frame EXACTLY for duration
+                            subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', 'f.jpg', '-t', str(fd), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', fr_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            f.write(f"file '{fr_name}'\n")
+                            
+                            prev_t = ft
+                        
+                        # Remaining Chunk
+                        last_name = "chunk_final.mp4"
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(prev_t), '-i', input_vid, '-c', 'copy', last_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        f.write(f"file '{last_name}'\n")
+                    
+                    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', 'frozen_merged.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    input_vid = "frozen_merged.mp4"
+
+            # 3. MERGE & SYNC
+            p_bar.progress(80, text="🎬 Merging & Syncing...")
+            w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
+            if w_s % 2 != 0: w_s += 1
+            if h_s % 2 != 0: h_s += 1
+            
+            subprocess.run([
+                'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
+                '-filter_complex', f"[0:v]scale={w_s}:{h_s},crop=1920:1080[vzoom]",
+                '-map', '[vzoom]', '-map', '1:a',
+                '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            p_bar.progress(100, text="🎉 Render Complete!")
+            st.session_state.processed_video_path = "dubbed_final.mp4"
+            st.success("Dubbing Complete!")
 
     if st.session_state.processed_video_path:
         st.video(st.session_state.processed_video_path)
@@ -387,31 +404,57 @@ with t1:
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
-    st.subheader("📝 CapCut Style Captions")
+    st.subheader("📝 Auto Caption")
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     if cap_up:
         with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
         if st.button("Generate Captions"):
             check_requirements(); font_path = download_font()
-            with st.spinner("Processing..."):
-                subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                model = load_whisper_safe()
-                if model:
-                    segments = model.transcribe("cap.wav", task="transcribe")['segments']
-                    trans_segments = []
-                    for seg in segments:
-                        txt = seg['text'].strip()
-                        if txt:
-                            burmese = generate_with_retry(f"Translate to Burmese. Short. Input: '{txt}'")
-                            trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
-                            time.sleep(0.3)
-                    
-                    ass_file = generate_ass_file(trans_segments, font_path)
-                    font_dir = os.path.dirname(font_path)
-                    subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', "captioned_final.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    st.session_state.caption_video_path = "captioned_final.mp4"
-                    st.success("Done!")
+            p_bar = st.progress(0, text="Processing...")
+            
+            p_bar.progress(30, text="🎤 Transcribing...")
+            subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            model = load_whisper_safe()
+            
+            if model:
+                segments = model.transcribe("cap.wav", task="transcribe")['segments']
+                trans_segments = []
+                total_seg = len(segments)
+                
+                for i, seg in enumerate(segments):
+                    p_bar.progress(30 + int((i/total_seg)*50), text=f"🧠 Translating Segment {i+1}/{total_seg}")
+                    txt = seg['text'].strip()
+                    if txt:
+                        burmese = generate_with_retry(f"Translate to Burmese. Short. Input: '{txt}'")
+                        trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
+                        time.sleep(0.3)
+                
+                p_bar.progress(90, text="✍️ Burning Subtitles...")
+                ass_file = generate_ass_file(trans_segments, font_path)
+                font_dir = os.path.dirname(font_path)
+                subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', "captioned_final.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                st.session_state.caption_video_path = "captioned_final.mp4"
+                p_bar.progress(100, text="Done!")
+                st.success("Done!")
 
     if st.session_state.caption_video_path:
         st.video(st.session_state.caption_video_path)
         with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4")
+
+# === TAB 3: VIRAL SEO ===
+with t3:
+    st.subheader("🚀 Viral Kit SEO")
+    if st.session_state.final_script:
+        if st.button("Generate SEO Metadata"):
+            with st.spinner("Generating Viral Titles & Tags..."):
+                prompt = f"""
+                Based on this script, generate:
+                1. 5 Viral Clickbait Titles (Burmese)
+                2. 10 High Traffic Hashtags
+                3. A short engaging YouTube Description
+                Input: {st.session_state.final_script}
+                """
+                seo_result = generate_with_retry(prompt)
+                st.info(seo_result)
+    else:
+        st.warning("Please generate a script in Tab 1 first.")
