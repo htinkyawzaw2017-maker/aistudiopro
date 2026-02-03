@@ -60,6 +60,29 @@ if 'seo_result' not in st.session_state: st.session_state.seo_result = ""
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
+def check_requirements():
+    if shutil.which("ffmpeg") is None:
+        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
+        st.stop()
+
+def get_duration(path):
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return float(json.loads(r.stdout)['format']['duration'])
+    except: return 0
+
+def download_font():
+    # Download Bold font for better visibility
+    font_filename = "Padauk-Bold.ttf"
+    if not os.path.exists(font_filename):
+        url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
+        try:
+            r = requests.get(url, timeout=10)
+            with open(font_filename, 'wb') as f: f.write(r.content)
+        except: pass
+    return os.path.abspath(font_filename)
+
 # ---------------------------------------------------------
 # 🔢 BURMESE NUMBER CONVERTER (TEXT NORMALIZATION)
 # ---------------------------------------------------------
