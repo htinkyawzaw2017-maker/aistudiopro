@@ -429,21 +429,16 @@ def refine_script_hvc(model, text, title, custom_prompt):
 # ---------------------------------------------------------
 st.markdown("""<div class="main-header"><h1>🎬 Myanmar AI Studio Pro</h1></div>""", unsafe_allow_html=True)
 
+# SIDEBAR CODE SECTION
 with st.sidebar:
     st.header("⚙️ Settings")
     
-    # Secrets ထဲက Key ရှိရင် Auto ယူမယ် (မရှိရင် အလွတ်ပြမယ်)
-    try:
-        default_key = st.secrets.get("GOOGLE_API_KEY", "")
-    except:
-        default_key = ""
+    # Secrets ထဲက Key ကို အရင်ရှာမယ်
+    default_key = st.secrets.get("GOOGLE_API_KEY", "")
     
-    api_key = st.text_input("🔑 Google API Key", type="password", value=st.session_state.get("api_key", default_key))
-    
+    api_key = st.text_input("🔑 Google API Key", type="password", value=default_key)
     if api_key: st.session_state.api_key = api_key
-    
-    st.divider()
-    
+
     # 🔥 ဒီ model_name ကြေညာတာ မရှိလို့ Error တက်တာပါ
     model_name = st.selectbox("🤖 AI Model", ["gemini-1.5-flash", "gemini-2.0-flash-exp"])
     
