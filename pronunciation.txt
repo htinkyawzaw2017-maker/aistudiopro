@@ -144,16 +144,16 @@ DC = ဒီစီ
 Neanderthals = နီယန်ဒါသယ်
 
 # --- 1. လူသားမျိုးစိတ်များနှင့် ဆင့်ကဲဖြစ်စဉ် (Human Evolution) ---
-Homo Sapiens = ဟိုမိုဆေးပီးယန်း
-Homo Erectus = ဟိုမိုအီရက်တပ်စ်
-Homo Habilis = ဟိုမိုဟာဘီလစ်စ်
+HomoSapiens = ဟိုမိုဆေးပီးယန်း
+HomoErectus = ဟိုမိုအီရက်တပ်စ်
+HomoHabilis = ဟိုမိုဟာဘီလစ်စ်
 Neanderthal = နီယန်ဒါသယ်
 Denisovan = ဒယ်နီဆိုဗန်
 Australopithecus = အော်စထရာလို ပစ်သီးကပ်စ်
 Australopithecus Afarensis = အော်စထရာလို ပစ်သီးကပ်စ် အာဖာရန်ဆစ်
 Lucy = လူစီ
-Homo Heidelbergensis = ဟိုမိုဟိုက်ဒါဘက်ဂျန်ဆစ်
-Homo Floresiensis = ဟိုမိုဖလိုရက်ဆီယန်ဆစ်
+HomoHeidelbergensis = ဟိုမိုဟိုက်ဒါဘက်ဂျန်ဆစ်
+HomoFloresiensis = ဟိုမိုဖလိုရက်ဆီယန်ဆစ်
 Paranthropus = ပါရန်သရိုပတ်စ်
 Ardipithecus = အာဒီပစ်သီးကပ်စ်
 Primate = ပရိုင်းမိတ်
@@ -169,6 +169,11 @@ Skull = စကဲလ်
 Fossil = ဖော့ဆဲလ်
 Skeleton = စကဲလီတန်
 Mammoths = အမွေးရှည်မာမွတ်ဆင်
+HomoSapiens = ဟိုမိုဆေးပီးယန်း
+Homosapiens = ဟိုမိုဆေးပီးယန်း
+Homesapiens = ဟိုမိုဆေးပီးယန်း  (စာလုံးပေါင်းမှားတာကိုပါ ဖမ်းခိုင်းလိုက်တာပါ)
+Homo = ဟိုမို
+Sapiens = ဆေးပီးယန်း
 
 # --- 2. ခေတ်ကာလများ (Geological Eras & Ages) ---
 Stone Age = စတုန်းအေးချ်
