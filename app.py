@@ -95,6 +95,15 @@ if 'api_keys' not in st.session_state: st.session_state.api_keys = []
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
 # 🔊 SIMPLE AUDIO GENERATOR (For single chunk)
+
+# --- LOADERS FOR DICTIONARIES ---
+def load_custom_dictionary():
+    # For Gemini (Text Generation)
+    dict_file = "dictionary.txt"
+    if os.path.exists(dict_file):
+        with open(dict_file, "r", encoding="utf-8") as f: return f.read()
+    return ""
+
 def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
     if not text.strip(): return False
     processed_text = normalize_text_for_tts(text) # Pronunciation & Pause logic applied here
