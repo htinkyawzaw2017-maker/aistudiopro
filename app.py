@@ -94,52 +94,80 @@ if 'api_keys' not in st.session_state: st.session_state.api_keys = []
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
-def load_pronunciation_dict():
-    # Pronunciation Dictionary Loader
-    pron_file = "pronunciation.txt"
-    replacements = {}
-    if os.path.exists(pron_file):
-        with open(pron_file, "r", encoding="utf-8") as f:
-            for line in f:
-                # "Original = Sound" ပုံစံကို ရှာပြီး ခွဲခြားခြင်း
-                if "=" in line and not line.startswith("#"):
-                    parts = line.split("=")
-                    if len(parts) == 2:
-                        replacements[parts[0].strip()] = parts[1].strip()
-    return replacements
-
-def check_requirements():
-    if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
-        st.stop()
-
-def get_duration(path):
+# 🔊 SIMPLE AUDIO GENERATOR (For single chunk)
+def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
+    if not text.strip(): return False
+    processed_text = normalize_text_for_tts(text) # Pronunciation & Pause logic applied here
     try:
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        return float(json.loads(r.stdout)['format']['duration'])
-    except: return 0.0
+        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+        cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL)
+        return True
+    except: return False
 
-def download_font():
-    font_filename = "Padauk-Bold.ttf"
-    if not os.path.exists(font_filename):
-        url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
-        try:
-            r = requests.get(url, timeout=10)
-            with open(font_filename, 'wb') as f: f.write(r.content)
-        except: pass
-    return os.path.abspath(font_filename)
+# 🧠 SMART EMOTION AUDIO ENGINE (Parses tags and merges audio)
+def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, base_speed=1.0):
+    # 1. Default Settings from Base Mode
+    base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
+    current_rate = int(base_settings['rate'].replace('%', ''))
+    current_pitch = int(base_settings['pitch'].replace('Hz', ''))
+    
+    # Apply Slider Speed to Base Rate
+    slider_adj = int((base_speed - 1.0) * 100)
+    current_rate += slider_adj
 
-def load_whisper_safe():
-    try: return whisper.load_model("base")
-    except Exception as e: st.error(f"Whisper Error: {e}"); return None
+    # 2. Split Text by Tags (e.g., [sad], [happy])
+    # Regex to capture tags like [sad] and keep them as separators
+    parts = re.split(r'(\[.*?\])', full_text)
+    
+    audio_segments = []
+    chunk_idx = 0
 
-def load_custom_dictionary():
-    dict_file = "dictionary.txt"
-    if os.path.exists(dict_file):
-        with open(dict_file, "r", encoding="utf-8") as f:
-            return f.read()
-    return ""
+    for part in parts:
+        part = part.strip()
+        if not part: continue
+
+        # Check if this part is a Tag
+        if part.lower() in EMOTION_MAP:
+            # Update settings for NEXT chunks
+            emo = EMOTION_MAP[part.lower()]
+            # Reset to base first, then apply emotion offset
+            base_r = int(base_settings['rate'].replace('%', '')) + slider_adj
+            base_p = int(base_settings['pitch'].replace('Hz', ''))
+            
+            emo_r = int(emo['rate'].replace('%', ''))
+            emo_p = int(emo['pitch'].replace('Hz', ''))
+            
+            current_rate = base_r + emo_r
+            current_pitch = base_p + emo_p
+            continue # Tag itself is not spoken
+        
+        # If it's Text -> Generate Audio with current settings
+        chunk_filename = f"chunk_{chunk_idx}.mp3"
+        rate_str = f"{current_rate:+d}%"
+        pitch_str = f"{current_pitch:+d}Hz"
+        
+        success = generate_single_chunk(part, lang, gender, rate_str, pitch_str, chunk_filename)
+        if success:
+            audio_segments.append(chunk_filename)
+            chunk_idx += 1
+
+    # 3. Merge All Chunks using FFmpeg
+    if not audio_segments: return False, "No audio generated"
+    
+    concat_list = "audio_concat.txt"
+    with open(concat_list, "w") as f:
+        for seg in audio_segments:
+            f.write(f"file '{seg}'\n")
+            
+    try:
+        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Cleanup temp files
+        for seg in audio_segments: os.remove(seg)
+        os.remove(concat_list)
+        return True, "Success"
+    except Exception as e:
+        return False, str(e)
 
 # ---------------------------------------------------------
 # 🔢 NUMBER & TEXT NORMALIZATION
@@ -275,6 +303,16 @@ def generate_with_retry(prompt):
 # ---------------------------------------------------------
 # 🔊 AUDIO ENGINE
 # ---------------------------------------------------------
+# 🔥 EMOTION SETTINGS (Tag -> Pitch/Rate Adjustments)
+EMOTION_MAP = {
+    "[normal]": {"rate": "+0%", "pitch": "+0Hz"},
+    "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},  # နှေးပြီး အသံနိမ့်မယ်
+    "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},   # မြန်ပြီး အသံမာမယ်
+    "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},  # သွက်ပြီး အသံမြင့်မယ်
+    "[action]": {"rate": "+30%", "pitch": "+0Hz"},   # အက်ရှင်ခန်း လိုမျိုး အရမ်းမြန်မယ်
+    "[whisper]": {"rate": "-10%", "pitch": "-20Hz"}, # တိုးတိုးလေး ပြောသလို
+}
+
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
     "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
@@ -480,7 +518,9 @@ with t1:
             p_bar = st.progress(0, text="🚀 Initializing...")
             
             p_bar.progress(30, text="🔊 Generating Neural Speech (Applied Pronunciation Fix)...")
-            generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
+            #generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
+            # 🔥 CALLING NEW EMOTION ENGINE
+            generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
             st.session_state.processed_audio_path = "voice.mp3"
             
             p_bar.progress(50, text="❄️ Applying Visual Effects...")
