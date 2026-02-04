@@ -1,0 +1,244 @@
+# --- 1. အသုံးများသော အတိုကောက်များ (Acronyms) ---
+AI = အေအိုင်
+TV = တီဗီ
+OK = အိုကေ
+USA = ယူအက်စ်အေ
+CIA = စီအိုင်အေ
+FBI = အက်ဖ်ဘီအိုင်
+UFO = ယူအက်ဖ်အို
+VIP = ဗီအိုင်ပီ
+SOS = အက်စ်အိုအက်စ်
+CEO = စီအီးအို
+GPS = ဂျီပီအက်စ်
+PDF = ပီဒီအက်ဖ်
+USB = ယူအက်စ်ဘီ
+Wi-Fi = ဝိုင်ဖိုင်
+Wifi = ဝိုင်ဖိုင်
+ID = အိုင်ဒီ
+CD = စီဒီ
+DVD = ဒီဗီဒီ
+SCP = အက်စ်စီပီ
+
+# --- 2. ဆိုရှယ်မီဒီယာနှင့် နည်းပညာ (Tech & Social) ---
+Facebook = ဖေ့စ်ဘွတ်ခ်
+YouTube = ယူကျု့
+TikTok = တစ်တော့
+Google = ဂူဂဲလ်
+Instagram = အင်စတာဂရမ်
+Messenger = မက်ဆင်ဂျာ
+Viber = ဗိုက်ဘာ
+Telegram = တယ်လီဂရမ်
+Internet = အင်တာနက်
+Online = အွန်လိုင်း
+Website = ဝက်ဘ်ဆိုက်
+App = အက်ပ်
+Software = ဆော့ဖ်ဝဲလ်
+Update = အပ်ဒိတ်
+Download = ဒေါင်းလုဒ်
+Upload = အပ်လုဒ်
+Link = လင့်ခ်
+Phone = ဖုန်း
+Laptop = လက်ပ်တော့
+Computer = ကွန်ပျူတာ
+Camera = ကင်မရာ
+Digital = ဒီဂျစ်တယ်
+Technology = တက်ခနိုလော်ဂျီ
+Hacker = ဟက်ကာ
+Virus = ဗိုင်းရပ်စ်
+
+# --- 3. ရုပ်ရှင်နှင့် ဇာတ်လမ်းဆိုင်ရာ (Movie Terms) ---
+Sci-fi = ဆိုင်ဖိုင်
+Action = အက်ရှင်
+Horror = ဟောရာ
+Drama = ဒရမ်မာ
+Thriller = သရဲလား
+Comedy = ဟာသ
+Series = စီးရီး
+Season = စီဇင်
+Episode = အပိုင်း
+Movie = မူဗီ
+Cinema = ဆီနီမာ
+Trailer = ထရွိုင်လာ
+Zombie = ဇွန်ဘီ
+Alien = အေလီယင်
+Monster = မွန်းစတား
+Hero = ဟီးရိုး
+Villain = ဗီလိန်
+Superpower = စူပါပါဝါ
+Robot = ရိုဘော့
+
+# --- 4. နေ့စဉ်သုံး အင်္ဂလိပ်စကားလုံးများ (Daily Loanwords) ---
+Mr. = မစ္စတာ
+Mrs. = မစ္စစ်
+Ms. = မစ်စ
+Dr. = ဒေါက်တာ
+Club = ကလပ်
+Bar = ဘား
+Counter = ကောင်တာ
+Gate = ဂိတ်
+Ticket = လက်မှတ်
+Bus = လိုင်းကား
+Taxi = တက္ကစီ
+Driver = ဒရိုင်ဘာ
+Police = ရဲ
+Office = ရုံး
+Market = ဈေး
+Shopping = ရှော့ပင်
+Date = ချိန်းတွေ့မယ်
+Party = ပါတီ
+Show = ရှိုး
+Style = စတိုင်
+Fashion = ဖက်ရှင်
+Design = ဒီဇိုင်း
+Model = မော်ဒယ်
+Project = ပရောဂျက်
+Meeting = မီတင်
+Manager = မန်နေဂျာ
+Staff = သာမန်ဝန်ထမ်း
+Bonus = အပိုဆုကြေး
+Dollar = ဒေါ်လာ
+Credit Card = ကရက်ဒစ်ကတ်
+
+# --- 5. အချိန်နှင့် အကွာအဝေး (Units) ---
+km = ကီလိုမီတာ
+kg = ကီလို
+cm = စင်တီမီတာ
+mm = မီလီမီတာ
+min = မိနစ်
+sec = စက္ကန့်
+hr = နာရီ
+vs = ဗားဆက်စ်
+
+# --- 6. အထူးပြု စကားလုံးများ (Specific Context) ---
+Homo Erectus = ဟိုမိုအီရက်တပ်စ်
+DNA = ဒီအန်အေ
+NASA = နာဆာ
+Area 51 = ဧရိယာ ဖစ်ဖတီဝမ်း
+Titanic = တိုင်တန်းနစ်
+Avatar = အဗာတာ
+Marvel = မာဗယ်
+DC = ဒီစီ
+# --- 1. လူသားမျိုးစိတ်များနှင့် ဆင့်ကဲဖြစ်စဉ် (Human Evolution) ---
+Homo Sapiens = ဟိုမိုဆေးပီးယန်း
+Homo Erectus = ဟိုမိုအီရက်တပ်စ်
+Homo Habilis = ဟိုမိုဟာဘီလစ်စ်
+Neanderthal = နီယန်ဒါသယ်
+Denisovan = ဒယ်နီဆိုဗန်
+Australopithecus = အော်စထရာလို ပစ်သီးကပ်စ်
+Australopithecus Afarensis = အော်စထရာလို ပစ်သီးကပ်စ် အာဖာရန်ဆစ်
+Lucy = လူစီ
+Homo Heidelbergensis = ဟိုမိုဟိုက်ဒါဘက်ဂျန်ဆစ်
+Homo Floresiensis = ဟိုမိုဖလိုရက်ဆီယန်ဆစ်
+Paranthropus = ပါရန်သရိုပတ်စ်
+Ardipithecus = အာဒီပစ်သီးကပ်စ်
+Primate = ပရိုင်းမိတ်
+Hominid = ဟိုမီနစ်
+Great Ape = ဂရိတ်ဧပ့်
+Ancestor = အန်ဆက်စတာ
+Evolution = အက်ဗော်လူးရှင်း
+Species = စပီးရှီး
+Gene = ဂျီးန်
+DNA = ဒီအန်အေ
+Chromosome = ခရိုမိုဇုန်း
+Skull = စကဲလ်
+Fossil = ဖော့ဆဲလ်
+Skeleton = စကဲလီတန်
+
+# --- 2. ခေတ်ကာလများ (Geological Eras & Ages) ---
+Stone Age = စတုန်းအေးချ်
+Ice Age = အိုက်စ်အေးချ်
+Bronze Age = ဘရွန်းဇ်အေးချ်
+Iron Age = အိုင်းယွန်းအေးချ်
+Paleolithic = ပေလီယိုလစ်သစ်
+Mesolithic = မက်ဆိုလစ်သစ်
+Neolithic = နီယိုလစ်သစ်
+Pleistocene = ပလိုင်စတိုဆင်း
+Holocene = ဟိုလိုဆင်း
+Jurassic = ဂျူရာဆစ်
+Cretaceous = ခရီတေးရှပ်စ်
+Cambrian = ကမ်ဘရီယန်
+BC = ဘီစီ
+AD = အေဒီ
+Century = ဆန်ကျူရီ
+Millennium = မီလီနီယမ်
+Prehistoric = ပရီဟစ်စတောရစ်
+
+# --- 3. ရှေးဟောင်းယဉ်ကျေးမှုများ (Ancient Civilizations) ---
+Mesopotamia = မက်ဆိုပိုတေးမီးယား
+Sumerian = ဆူမေးရီးယန်း
+Babylon = ဘေဘီလုံ
+Egypt = အီဂျစ်
+Pharaoh = ဖာရို
+Pyramid = ပိရမစ်
+Mummy = မမ်မီ
+Hieroglyph = ဟိုင်ရိုဂလစ်ဖ်
+Sphinx = စဖင့်စ်
+Indus Valley = အိန္ဒုမြစ်ဝှမ်း
+Maya = မာယာ
+Aztec = အက်ဇ်တက်
+Inca = အင်ကာ
+Roman Empire = ရောမအမ်ပါယာ
+Greek = ဂရိ
+Sparta = စပါတာ
+Athens = အေသင်
+Viking = ဗိုင်းကင်း
+Mongol = မွန်ဂို
+Ottoman = အော်တိုမန်
+
+# --- 4. သမိုင်းဆိုင်ရာ နေရာများနှင့် အသုံးအနှုန်းများ ---
+Empire = အမ်ပါယာ
+Kingdom = ကင်းဒမ်း
+Dynasty = ဒိုင်းနပ်စတီ
+Colony = ကိုလိုနီ
+Republic = ရီပတ်ဘလစ်
+Democracy = ဒီမိုကရေစီ
+Revolution = တော်လှန်ရေး
+Civil War = ပြည်တွင်းစစ်
+World War = ကမ္ဘာစစ်
+Nazi = နာဇီ
+Soviet = ဆိုဗီယက်
+Communism = ကွန်မြူနစ်
+Capitalism = အရင်းရှင်
+Dictator = အာဏာရှင်
+Emperor = ဧကရာဇ်
+Gladiator = ဂလက်ဒီရေတာ
+Samurai = ဆာမူရိုင်း
+Ninja = နင်ဂျာ
+Knight = နိုက်
+Castle = ရဲတိုက်
+Temple = ဘုရားကျောင်း
+Museum = ပြတိုက်
+Archaeology = အာခီယော်လော်ဂျီ
+Artifact = အာတီဖက်ထ်
+
+# --- 5. သိပ္ပံနှင့် ကမ္ဘာ့သမိုင်း (Scientific History) ---
+Big Bang = ဘစ်ဘန်း
+Universe = ယူနီဗာ့စ်
+Galaxy = ဂလက်ဆီ
+Solar System = ဆိုလာစစ်စတမ်
+Planet = ပလက်နက်
+Asteroid = အက်စတာရွိုက်
+Meteor = မီတီယာ
+Volcano = ဗော်ကေနို
+Tsunami = ဆူနာမီ
+Earthquake = အာ့သ်ကွိတ်
+Continental Drift = ကွန်တီနန်တယ် ဒရစ်ဖ်
+Pangaea = ပန်ဂျီးယား
+Mammoth = မမို့သ်
+Dinosaur = ဒိုင်နိုဆော
+T-Rex = တီရက်စ်
+
+# --- 6. နာမည်ကြီး ပုဂ္ဂိုလ်များ (Famous Figures) ---
+Alexander the Great = အလက်ဇန္ဒား သည် ဂရိတ်
+Genghis Khan = ဂျင်ဂျစ်ခန်
+Julius Caesar = ဂျူးလိယက်ဆီဇာ
+Cleopatra = ကလီယိုပက်ထရာ
+Napoleon = နပိုလီယံ
+Einstein = အိုင်းစတိုင်း
+Hitler = ဟစ်တလာ
+Darwin = ဒါဝင်
+Da Vinci = ဒါဗင်ချီ
+Tesla = တက်စလာ
+Elon Musk = အီလွန်မတ်စ်
+
+
