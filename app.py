@@ -111,6 +111,33 @@ def check_requirements():
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
         st.stop()
 
+# ---------------------------------------------------------
+# 🛠️ MISSING HELPER FUNCTIONS (Restore these)
+# ---------------------------------------------------------
+
+def get_duration(path):
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return float(json.loads(r.stdout)['format']['duration'])
+    except: return 0.0
+
+def download_font():
+    font_filename = "Padauk-Bold.ttf"
+    if not os.path.exists(font_filename):
+        url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
+        try:
+            r = requests.get(url, timeout=10)
+            with open(font_filename, 'wb') as f: f.write(r.content)
+        except: pass
+    return os.path.abspath(font_filename)
+
+def load_whisper_safe():
+    try: return whisper.load_model("base")
+    except Exception as e: st.error(f"Whisper Error: {e}"); return None
+
+# ---------------------------------------------------------
+
 # 🧠 SMART EMOTION AUDIO ENGINE (Parses tags and merges audio)
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, base_speed=1.0):
     # 1. Default Settings from Base Mode
