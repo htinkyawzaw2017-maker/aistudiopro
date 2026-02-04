@@ -678,3 +678,27 @@ Game over = ရှောသွားပြီလေ
 bite force = ကိုက်အား
 PSI = ပီအက်စ်အိုင်
 
+# --- Common Translation Fixes ---
+Fall = ပြုတ်ကျ
+Fell = ပြုတ်ကျခဲ့
+Run = ပြေး
+Ran = ပြေးခဲ့
+Drop = ပြုတ်ကျ
+
+# --- Avatar (Movie Terms) ---
+Avatar = အဗာတာ
+Pandora = ပန်ဒိုရာ
+Jake Sully = ဂျိတ်ခ် ဆာလီ
+Jake = ဂျိတ်ခ်
+Sully = ဆာလီ
+Neytiri = နေတီရီ
+Na'vi = နာဗီ
+Toruk Makto = တိုရု မက်တို
+Eywa = အေဝါ
+Colonel = ဗိုလ်မှူးကြီး
+Quaritch = ကွာရစ်ခ်ျ
+Tsireya = ဆီရေယာ
+Neteyam = နေတေယမ်
+Lo'ak = လိုအက်ခ်
+Kiri = ကီရီ
+Spider = စပိုက်ဒါ
