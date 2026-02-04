@@ -278,15 +278,6 @@ st.markdown("""<div class="main-header">🎬 Myanmar AI Studio Pro</div>""", uns
 
 with st.sidebar:
     st.header("⚙️ Control Panel")
-
-            st.markdown("**2. Pronunciation Rules (TTS)**")
-        pron_file = st.file_uploader("Upload 'pronunciation.txt'", type=['txt'], key="pron_up")
-        
-        if pron_file:
-            # ဖိုင်ကို Server ပေါ် တင်ပြီး သိမ်းလိုက်မည်
-            with open("pronunciation.txt", "wb") as f: f.write(pron_file.getbuffer())
-            st.success("✅ Sound Rules Loaded!")
-
     
     # 🔥 DROPDOWN MENU BAR (EXPANDER)
     with st.expander("🔑 API & System Settings", expanded=True):
@@ -316,12 +307,29 @@ with st.sidebar:
         )
         st.caption("Tip: Use '2.0-flash-exp' for better logic.")
 
-    # 3. KNOWLEDGE BASE
-    with st.expander("📚 Knowledge Base (Training)", expanded=False):
-        train_file = st.file_uploader("Upload 'dictionary.txt'", type=['txt'])
+    # 3. KNOWLEDGE & PRONUNCIATION (Dictionary + Pronunciation)
+    with st.expander("📚 Knowledge & Pronunciation", expanded=False):
+        
+        # Part A: Script Rules
+        st.markdown("**1. Script Rules (Gemini)**")
+        st.caption("Upload 'dictionary.txt' for translation rules.")
+        train_file = st.file_uploader("Drop dictionary.txt", type=['txt'], key="dict_up")
+        
         if train_file:
             with open("dictionary.txt", "wb") as f: f.write(train_file.getbuffer())
-            st.success("Trained!")
+            st.success("✅ Script Rules Loaded!")
+
+        st.divider() # မျဉ်းတားလိုက်ခြင်း
+
+        # Part B: Pronunciation Rules (New Feature)
+        st.markdown("**2. Pronunciation Rules (TTS)**")
+        st.caption("Upload 'pronunciation.txt' for sound fixing.")
+        pron_file = st.file_uploader("Drop pronunciation.txt", type=['txt'], key="pron_up")
+        
+        if pron_file:
+            with open("pronunciation.txt", "wb") as f: f.write(pron_file.getbuffer())
+            st.success("✅ Sound Rules Loaded!")
+
 
     if st.button("🔴 Reset System", use_container_width=True):
         for key in st.session_state.keys(): del st.session_state[key]
