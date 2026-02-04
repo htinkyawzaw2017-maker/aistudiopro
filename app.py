@@ -94,6 +94,20 @@ if 'api_keys' not in st.session_state: st.session_state.api_keys = []
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
+def load_pronunciation_dict():
+    # Pronunciation Dictionary Loader
+    pron_file = "pronunciation.txt"
+    replacements = {}
+    if os.path.exists(pron_file):
+        with open(pron_file, "r", encoding="utf-8") as f:
+            for line in f:
+                # "Original = Sound" ပုံစံကို ရှာပြီး ခွဲခြားခြင်း
+                if "=" in line and not line.startswith("#"):
+                    parts = line.split("=")
+                    if len(parts) == 2:
+                        replacements[parts[0].strip()] = parts[1].strip()
+    return replacements
+
 def check_requirements():
     if shutil.which("ffmpeg") is None:
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
@@ -157,8 +171,21 @@ def num_to_burmese_spoken(num_str):
 
 def normalize_text_for_tts(text):
     if not text: return ""
+    
+    # 1. Basic Symbol Cleaning
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
+    
+    # 2. 🔥 PRONUNCIATION FIX (Loader ကို ခေါ်သုံးမည့်နေရာ) 🔥
+    pron_dict = load_pronunciation_dict()
+    for original, fixed_sound in pron_dict.items():
+        # စာလုံးအကြီးအသေး မရွေးဘဲ ရှာဖွေအစားထိုးခြင်း (Case Insensitive)
+        pattern = re.compile(re.escape(original), re.IGNORECASE)
+        text = pattern.sub(fixed_sound, text)
+        
+    # 3. Number Conversion
     text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
+    
+    # 4. Flow Fixes (Newlines & Pauses)
     text = text.replace("\n", " ")
     text = text.replace("...", " ")
     text = text.replace("၊", " ") 
@@ -251,6 +278,15 @@ st.markdown("""<div class="main-header">🎬 Myanmar AI Studio Pro</div>""", uns
 
 with st.sidebar:
     st.header("⚙️ Control Panel")
+
+            st.markdown("**2. Pronunciation Rules (TTS)**")
+        pron_file = st.file_uploader("Upload 'pronunciation.txt'", type=['txt'], key="pron_up")
+        
+        if pron_file:
+            # ဖိုင်ကို Server ပေါ် တင်ပြီး သိမ်းလိုက်မည်
+            with open("pronunciation.txt", "wb") as f: f.write(pron_file.getbuffer())
+            st.success("✅ Sound Rules Loaded!")
+
     
     # 🔥 DROPDOWN MENU BAR (EXPANDER)
     with st.expander("🔑 API & System Settings", expanded=True):
