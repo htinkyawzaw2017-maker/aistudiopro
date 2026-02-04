@@ -104,6 +104,20 @@ def load_custom_dictionary():
         with open(dict_file, "r", encoding="utf-8") as f: return f.read()
     return ""
 
+def load_pronunciation_dict():
+    # Pronunciation Dictionary Loader
+    pron_file = "pronunciation.txt"
+    replacements = {}
+    if os.path.exists(pron_file):
+        with open(pron_file, "r", encoding="utf-8") as f:
+            for line in f:
+                # "Original = Sound" ပုံစံကို ရှာပြီး ခွဲခြားခြင်း
+                if "=" in line and not line.startswith("#"):
+                    parts = line.split("=")
+                    if len(parts) == 2:
+                        replacements[parts[0].strip()] = parts[1].strip()
+    return replacements
+
 def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
     if not text.strip(): return False
     processed_text = normalize_text_for_tts(text) # Pronunciation & Pause logic applied here
