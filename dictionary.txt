@@ -221,19 +221,19 @@ No matter what = ဘယ်လိုပဲဖြစ်ဖြစ်
 Meanwhile back there = ဟိုဘက်မှာကျတော့
 
 # --- 5. မြန်မာမှုပြုထားသော အသုံးအနှုန်းများ (Localized Idioms) ---
-In trouble = ဒုက္ခလှလှ တွေ့ပြီ
+In trouble = ဒုက္ခလှလှတွေ့ပြီ
 Gone wrong = လွဲချော်ကုန်ပြီ
 Messing around = မွှေနှောက်နေတယ်
-Keep an eye on = မျက်ခြေမပြတ် ကြည့်နေတယ်
-Run for life = အသက်လုပြီး ပြေးရတယ်
+Keep an eye on = မျက်ခြေမပြတ်ကြည့်နေတယ်
+Run for life = အသက်လုပြီးပြေးရတယ်
 Face to face = မျက်နှာချင်းဆိုင်
 On purpose = တမင်သက်သက်
 Give up = လက်မြှောက်လိုက်တယ်
-Show off = ဆရာကြီး လုပ်နေတယ်
-Acting = အိုင်တင် ခံနေတယ်
+Show off = ဆရာကြီးလုပ်နေတယ်
+Acting = အိုင်တင်ခံနေတယ်
 Mind blown = ခေါင်းပါစားသွားတယ်
-Speechless = ပြောစရာ စကားမရှိတော့ဘူး
-Out of control = ထိန်းမရ သိမ်းမရ
+Speechless = ပြောစရာစကားမရှိတော့ဘူး
+Out of control = ထိန်းမရသိမ်းမရ
 Risk = စွန့်စားပြီး
 Chance = အခွင့်အရေး
 Clue = သဲလွန်စ
