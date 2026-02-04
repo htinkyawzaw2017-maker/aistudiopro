@@ -105,6 +105,12 @@ def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
         return True
     except: return False
 
+# Helper Functions နေရာမှာ ဒါလေး ပြန်ထည့်ပေးပါ
+def check_requirements():
+    if shutil.which("ffmpeg") is None:
+        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
+        st.stop()
+
 # 🧠 SMART EMOTION AUDIO ENGINE (Parses tags and merges audio)
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, base_speed=1.0):
     # 1. Default Settings from Base Mode
