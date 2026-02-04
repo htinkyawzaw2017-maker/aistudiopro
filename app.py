@@ -533,15 +533,12 @@ with t1:
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
 
-    
-
-        # ⚠️ ဒီ code block က 'with t1:' ရဲ့ အောက်မှာ ရှိနေရမယ် (Space 4 ချက် ဝင်နေရမယ်)
     if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # 🔥 UPDATED: DUBBING MODE REFINEMENT (Sync Focus)
+            # 🔥 UPDATED: DUBBING MODE REFINEMENT
             if st.button("✨ Refine: Dubbing Mode (Sync Fix)", use_container_width=True):
                 with st.spinner("Refining for lip-sync & concise timing..."):
                     prompt = f"""
@@ -557,13 +554,12 @@ with t1:
                     4. **FORBIDDEN:** Do NOT use 'ဗျ', 'ရှင့်', 'သည်', '၏', '၎င်း'.
                     5. **GOAL:** Match the video speed. Direct translation.
                     """
-                    # AI Call
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
-        
+
         with c_opt2:
              if st.button("↩️ Reset Script", use_container_width=True): pass
-        
+
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
         
         # Duration Estimation
@@ -571,17 +567,16 @@ with t1:
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
         
-        # 🔥 NEW: EXPORT FORMAT SELECTION
+        # 🔥 EXPORT OPTIONS
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
         c_fmt, c_spd = st.columns([1, 1])
         with c_fmt:
-            # Video vs Audio Switch
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
         with c_spd:
             audio_speed = st.slider("🔊 Audio Speed", 0.8, 1.5, 1.0, 0.05)
-        
+
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
@@ -589,7 +584,7 @@ with t1:
         
         zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
         
-        # Freeze Frame Settings (Only show if Video is selected)
+        # Freeze Frame Logic
         if "Video" in export_format:
             with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
                 c1, c2 = st.columns(2)
@@ -600,17 +595,15 @@ with t1:
                 with c2: manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
         else:
             auto_freeze = None; manual_freeze = None
-        
-        # 🔥 RENDER BUTTON LOGIC UPDATE
+
+        # 🔥 RENDER BUTTON
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
         
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
             
-            # 1. Generate Audio (Common for both)
+            # 1. Generate Audio
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
-            
-            # Calling the Smart Emotion Engine
             try:
                 generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
                 st.session_state.processed_audio_path = "voice.mp3"
@@ -618,18 +611,16 @@ with t1:
                 st.error(f"Audio Error: {e}")
                 st.stop()
             
-            # 2. Check Format
+            # 2. Process Video or Skip
             if "Audio" in export_format:
-                # SKIP VIDEO PROCESSING
-                p_bar.progress(100, text="✅ Audio Generated Successfully!")
+                p_bar.progress(100, text="✅ Audio Generated!")
                 st.success("Audio Only Mode: Complete!")
             
             else:
-                # VIDEO PROCESSING (Only runs if Video is selected)
                 p_bar.progress(50, text="❄️ Processing Video Frames...")
                 input_vid = "input.mp4"
                 
-                # Freeze Logic
+                # ... Freeze Logic ...
                 if auto_freeze or manual_freeze:
                     freeze_pts = []
                     dur = get_duration(input_vid)
@@ -639,7 +630,6 @@ with t1:
                         if match: freeze_pts = [(float(match.group(1)), float(match.group(2)))]
                     
                     if freeze_pts:
-                        # ... (Freeze logic same as before) ...
                         concat_file = "concat_list.txt"
                         prev_t = 0
                         with open(concat_file, "w") as f:
@@ -654,8 +644,8 @@ with t1:
                             f.write(f"file 'c_end.mp4'\n")
                         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', 'frozen.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         input_vid = "frozen.mp4"
-        
-                p_bar.progress(80, text="🎬 Merging Audio & Video...")
+
+                p_bar.progress(80, text="🎬 Merging...")
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
@@ -670,13 +660,12 @@ with t1:
                 p_bar.progress(100, text="🎉 Video Complete!")
                 st.session_state.processed_video_path = "dubbed_final.mp4"
                 st.success("Dubbing Complete!")
-        
-        if st.session_state.processed_video_path and "Video" in export_format:
+
+    if st.session_state.processed_video_path and "Video" in export_format:
         st.video(st.session_state.processed_video_path)
         with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
-        
-        if st.session_state.processed_audio_path:
-        # Audio Player (Always show if generated)
+
+    if st.session_state.processed_audio_path:
         st.audio(st.session_state.processed_audio_path)
         with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
         
