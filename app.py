@@ -18,68 +18,102 @@ import textwrap
 import math
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP (CUSTOM CSS FOR HYPER-REALISM)
+# 🎨 UI SETUP (NEON SPACE THEME)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
-    /* 1. HIDE DEFAULT STREAMLIT NAVBAR & FOOTER */
-    .stApp > header {visibility: hidden;}
-    .stApp > footer {visibility: hidden;}
-    #MainMenu {visibility: hidden;}
-    
-    /* 2. GLOBAL THEME */
-    .stApp { background-color: #050505; color: #e0e0e0; }
-    
-    /* 3. STYLING TABS AS BOXES (BUTTONS) */
-    div[data-baseweb="tab-list"] {
-        gap: 10px;
-        background-color: transparent;
-    }
-    div[data-baseweb="tab"] {
-        background-color: #112240;
-        border-radius: 8px;
-        padding: 10px 20px;
-        color: #8892b0;
-        border: 1px solid #233554;
-        font-weight: bold;
-        flex-grow: 1; /* Full width boxes */
-        text-align: center;
-    }
-    div[data-baseweb="tab"]:hover {
-        background-color: #1a2f55;
-        color: white;
-        border-color: #64ffda;
-    }
-    div[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #00d2ff; /* Neon Blue Active */
-        color: black !important;
-        border-color: #00d2ff;
-        box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+    /* 1. Global Background (Space Theme) */
+    .stApp {
+        background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
+        background-attachment: fixed;
+        background-size: cover;
+        background-position: center;
+        color: #e0e0e0;
     }
     
-    /* 4. MAIN HEADER STYLE */
+    /* 2. Hide Standard Header/Footer */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    
+    /* 3. NEON Title Style */
     .main-header {
-        font-family: 'Helvetica Neue', sans-serif;
+        font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        padding: 10px; text-align: center; margin-bottom: 20px;
-        font-size: 3rem; font-weight: 900;
-        text-shadow: 0px 0px 20px rgba(0,255,136,0.3);
+        text-align: center;
+        font-size: 3.5rem;
+        font-weight: 800;
+        text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
+        margin-bottom: 20px;
     }
     
-    /* 5. INPUT FIELDS STYLE */
-    input[type="text"], input[type="password"], textarea { 
-        background-color: #0a192f !important; color: #64ffda !important; 
-        border: 1px solid #112240 !important; border-radius: 8px !important;
+    /* 4. Custom Containers (Glassmorphism + Neon Border) */
+    div[data-testid="stFileUploader"], div[data-testid="stExpander"], div[class="stTextArea"] {
+        background-color: rgba(10, 25, 47, 0.85); /* Semi-transparent dark blue */
+        border: 1px solid #00d2ff;
+        border-radius: 15px;
+        padding: 15px;
+        box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
+        backdrop-filter: blur(5px);
     }
     
-    /* 6. INFO BOX */
-    .info-box { background: #112240; padding: 15px; border-radius: 10px; border-left: 5px solid #00d2ff; margin: 10px 0; color: white;}
+    /* 5. Glowing Buttons */
+    .stButton > button {
+        background: linear-gradient(45deg, #ff00cc, #3333ff);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 24px;
+        font-weight: bold;
+        transition: all 0.3s ease;
+        box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+    }
+    .stButton > button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 0 30px rgba(255, 0, 204, 0.7);
+    }
+
+    /* 6. Text Inputs & Select Boxes */
+    input, textarea, select, div[data-baseweb="select"] {
+        background-color: #050b14 !important;
+        color: #00d2ff !important;
+        border: 1px solid #1f4068 !important;
+        border-radius: 8px !important;
+    }
+
+    /* 7. Tabs Styling */
+    div[data-baseweb="tab-list"] {
+        background-color: rgba(0,0,0,0.5);
+        border-radius: 15px;
+        padding: 5px;
+        border: 1px solid #333;
+    }
+    div[data-baseweb="tab"] {
+        color: #888;
+        font-weight: bold;
+    }
+    div[data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(90deg, #ff4b1f, #ff9068);
+        color: white !important;
+        border-radius: 10px;
+    }
     </style>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    
 """, unsafe_allow_html=True)
+
+# Title with Icon
+st.markdown("""
+<div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
+    <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="80"/>
+    <div class="main-header">Myanmar AI Studio Pro</div>
+</div>
+""", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------
 # 💾 STATE MANAGEMENT
