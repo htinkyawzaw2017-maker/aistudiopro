@@ -172,24 +172,30 @@ def num_to_burmese_spoken(num_str):
 def normalize_text_for_tts(text):
     if not text: return ""
     
-    # 1. Basic Symbol Cleaning
+    # 1. Basic Symbol Cleaning (မလိုတဲ့ သင်္ကေတတွေ ဖယ်မယ်)
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
     
-    # 2. 🔥 PRONUNCIATION FIX (Loader ကို ခေါ်သုံးမည့်နေရာ) 🔥
+    # 2. PRONUNCIATION FIX (အသံထွက် ပြင်ဆင်ခြင်း)
     pron_dict = load_pronunciation_dict()
     for original, fixed_sound in pron_dict.items():
-        # စာလုံးအကြီးအသေး မရွေးဘဲ ရှာဖွေအစားထိုးခြင်း (Case Insensitive)
         pattern = re.compile(re.escape(original), re.IGNORECASE)
         text = pattern.sub(fixed_sound, text)
         
-    # 3. Number Conversion
+    # 3. 🔥 PAUSE LOGIC (အဖြတ်အတောက် သင်ပေးခြင်း) 🔥
+    # မြန်မာ '၊' ကို English ',' (ကော်မာ) ပြောင်းမှ AI က ခဏရပ်တတ်တယ်
+    text = text.replace("၊", ", ") 
+    text = text.replace("။", ". ")
+    
+    # User က [p] လို့ရေးရင် အကြာကြီးရပ်မယ့် logic (ဥပမာ - ... ထည့်ပေးလိုက်ခြင်း)
+    text = text.replace("[p]", "... ") 
+        
+    # 4. Number Conversion
     text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
     
-    # 4. Flow Fixes (Newlines & Pauses)
+    # 5. Remove Newlines (ဒါပေမဲ့ ပုဒ်ဖြတ်တွေ ကျန်ခဲ့မယ်)
     text = text.replace("\n", " ")
-    text = text.replace("...", " ")
-    text = text.replace("၊", " ") 
     text = re.sub(r'\s+', ' ', text).strip()
+    
     return text
 
 # ---------------------------------------------------------
@@ -367,19 +373,33 @@ with t1:
                 st.rerun()
 
     if st.session_state.final_script:
+            if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
+            # 🔥 UPDATED REFINEMENT BUTTON (FORCES BURMESE OUTPUT)
             if st.button("✨ Refine: Storytelling Mode", use_container_width=True):
-                prompt = f"Rewrite as Storytelling/Recap Style. NO 'ဗျ/ရှင့်'. Input: {st.session_state.final_script}"
-                st.session_state.final_script = generate_with_retry(prompt)
-                st.rerun()
-        with c_opt2:
-            if st.button("↩️ Reset Script", use_container_width=True): pass
+                with st.spinner("Refining Script into Burmese Storytelling Style..."):
+                    prompt = f"""
+                    Act as a professional Myanmar Movie Narrator.
+                    Rewrite the following input text into natural, engaging **Burmese spoken language** (Storytelling Style).
+                    
+                    Input Text: "{st.session_state.final_script}"
+                    
+                    **STRICT RULES:**
+                    1. **OUTPUT LANGUAGE:** MUST BE BURMESE (မြန်မာစာ) ONLY. Do not output English.
+                    2. **STYLE:** Storytelling/Recap style. Use natural endings like 'တယ်', 'မယ်', 'ပါ'.
+                    3. **FORBIDDEN:** Do NOT use 'ဗျ', 'ရှင့်', 'ခင်ဗျာ', 'သူ၏', '၎င်း', 'သည်', '၍'.
+                    4. **FLOW:** Make it continuous and exciting.
+                    """
+                    # AI Call
+                    st.session_state.final_script = generate_with_retry(prompt)
+                    st.rerun()
 
-        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
-        
+        with c_opt2:
+             if st.button("↩️ Reset Script", use_container_width=True): pass
+
         # Duration Est
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
