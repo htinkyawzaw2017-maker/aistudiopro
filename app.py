@@ -373,8 +373,7 @@ with t1:
                 st.rerun()
 
     if st.session_state.final_script:
-            if st.session_state.final_script:
-        st.markdown("### 🎬 Script & Production")
+     st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
