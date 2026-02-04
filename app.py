@@ -312,29 +312,27 @@ with st.sidebar:
             label_visibility="collapsed"
         )
         st.caption("Tip: Use '2.0-flash-exp' for better logic.")
-
-    # 3. KNOWLEDGE & PRONUNCIATION (Dictionary + Pronunciation)
+        
+    # 3. AUTO-LOAD KNOWLEDGE BASE (No Upload Needed)
     with st.expander("📚 Knowledge & Pronunciation", expanded=False):
-        
-        # Part A: Script Rules
-        st.markdown("**1. Script Rules (Gemini)**")
-        st.caption("Upload 'dictionary.txt' for translation rules.")
-        train_file = st.file_uploader("Drop dictionary.txt", type=['txt'], key="dict_up")
-        
-        if train_file:
-            with open("dictionary.txt", "wb") as f: f.write(train_file.getbuffer())
-            st.success("✅ Script Rules Loaded!")
+        st.info("📂 System is using internal files.")
 
-        st.divider() # မျဉ်းတားလိုက်ခြင်း
+        # Check Dictionary.txt
+        if os.path.exists("dictionary.txt"):
+            st.success("✅ dictionary.txt: Active")
+        else:
+            st.error("❌ dictionary.txt: Missing")
 
-        # Part B: Pronunciation Rules (New Feature)
-        st.markdown("**2. Pronunciation Rules (TTS)**")
-        st.caption("Upload 'pronunciation.txt' for sound fixing.")
-        pron_file = st.file_uploader("Drop pronunciation.txt", type=['txt'], key="pron_up")
-        
-        if pron_file:
-            with open("pronunciation.txt", "wb") as f: f.write(pron_file.getbuffer())
-            st.success("✅ Sound Rules Loaded!")
+        st.divider()
+
+        # Check Pronunciation.txt
+        if os.path.exists("pronunciation.txt"):
+            st.success("✅ pronunciation.txt: Active")
+        else:
+            st.error("❌ pronunciation.txt: Missing")
+            
+        if st.button("🔄 Reload Files"):
+            st.rerun()
 
 
     if st.button("🔴 Reset System", use_container_width=True):
