@@ -219,13 +219,15 @@ def num_to_burmese_spoken(num_str):
 def normalize_text_for_tts(text):
     if not text: return ""
     
+    # 🔥 STEP 0: NUCLEAR COMMA REMOVAL (ဂဏန်းကြားက ကော်မာများကို အရင်ဆုံး သတ်မယ်)
+    # 20,000 -> 20000 ဖြစ်သွားအောင် လုပ်သော အဆင့်
+    text = re.sub(r'(?<=\d),(?=\d)', '', text)
+
     # 1. Basic Symbol Cleaning
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
     
     # 2. Pronunciation Fix (Dictionary Check)
     pron_dict = load_pronunciation_dict()
-    # Sort keys by length (Longer first) to prevent partial replacement
-    # e.g., fix "40,000" before "4"
     sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
     
     for original in sorted_keys:
@@ -237,6 +239,20 @@ def normalize_text_for_tts(text):
     text = text.replace("၊", ", ") 
     text = text.replace("။", ". ")
     text = text.replace("[p]", "... ") 
+        
+    # 4. Number Conversion (Regex Updated)
+    # \d+ ဆိုတာ ကော်မာမရှိတော့တဲ့ ဂဏန်းတွေကို ရှာတာပါ
+    text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
+    
+    # 5. Fix "Lone Lauk Tae" (Specific Patch)
+    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့") 
+    text = text.replace("လုံလောက်သော", "လုံလောက်တဲ့")
+    
+    # 6. Final Clean
+    text = text.replace("\n", " ")
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
         
     # 4. 🔥 REGEX UPDATE FOR DECIMALS 🔥
     # အရင်က \b\d+\b (ဂဏန်းသီးသန့်) ပဲ ရှာတယ်
