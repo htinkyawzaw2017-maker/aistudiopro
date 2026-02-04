@@ -372,12 +372,15 @@ with t1:
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
 
+    
+
+        # ⚠️ ဒီ code block က 'with t1:' ရဲ့ အောက်မှာ ရှိနေရမယ် (Space 4 ချက် ဝင်နေရမယ်)
     if st.session_state.final_script:
-     st.markdown("### 🎬 Script & Production")
+        st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # 🔥 UPDATED REFINEMENT BUTTON (FORCES BURMESE OUTPUT)
+            # 🔥 REFINEMENT BUTTON (FORCES BURMESE OUTPUT)
             if st.button("✨ Refine: Storytelling Mode", use_container_width=True):
                 with st.spinner("Refining Script into Burmese Storytelling Style..."):
                     prompt = f"""
@@ -399,7 +402,9 @@ with t1:
         with c_opt2:
              if st.button("↩️ Reset Script", use_container_width=True): pass
 
-        # Duration Est
+        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
+        
+        # Duration Estimation
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
         st.markdown(f"<div class='info-box'>⏱️ Est. Duration: ~{est_min} mins</div>", unsafe_allow_html=True)
@@ -421,9 +426,9 @@ with t1:
             with c2: manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
         
         if st.button("🚀 RENDER FINAL VIDEO", use_container_width=True):
-            p_bar = st.progress(0, text="🚀 Initializing Engine...")
+            p_bar = st.progress(0, text="🚀 Initializing...")
             
-            p_bar.progress(30, text="🔊 Generating Neural Speech...")
+            p_bar.progress(30, text="🔊 Generating Neural Speech (Applied Pronunciation Fix)...")
             generate_audio_cli(txt, target_lang, gender, v_mode, "voice.mp3", speed_multiplier=audio_speed)
             st.session_state.processed_audio_path = "voice.mp3"
             
@@ -436,9 +441,7 @@ with t1:
                 elif manual_freeze:
                     match = re.search(r'freeze\s*[:=]?\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)', manual_freeze)
                     if match: freeze_pts = [(float(match.group(1)), float(match.group(2)))]
-                
                 if freeze_pts:
-                    # Freeze Logic Implementation
                     concat_file = "concat_list.txt"
                     prev_t = 0
                     with open(concat_file, "w") as f:
@@ -454,7 +457,7 @@ with t1:
                     subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_file, '-c', 'copy', 'frozen.mp4'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     input_vid = "frozen.mp4"
 
-            p_bar.progress(80, text="🎬 Merging & Syncing...")
+            p_bar.progress(80, text="🎬 Merging...")
             w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
             if w_s % 2 != 0: w_s += 1
             if h_s % 2 != 0: h_s += 1
@@ -466,7 +469,7 @@ with t1:
                 '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
-            p_bar.progress(100, text="🎉 Render Complete!")
+            p_bar.progress(100, text="🎉 Complete!")
             st.session_state.processed_video_path = "dubbed_final.mp4"
             st.success("Dubbing Complete!")
 
