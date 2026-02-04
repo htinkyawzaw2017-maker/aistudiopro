@@ -659,5 +659,22 @@ Himalaya = ဟိမဝန္တာ
 Everest = ဧဝရတ်
 Sahara = ဆာဟာရ
 
+# --- Script Specific Animals (ဇာတ်ညွှန်းပါ သတ္တဝါများ) ---
+African lion = အာဖရိက ခြင်္သေ့
+Grizzly bear = ဂရစ်ဇလီ ဝက်ဝံ
+Saltwater crocodile = ရေငန် မိကျောင်း
+Great white shark = ဂရိတ်ဝိုက် ငါးမန်း
+Jaguar = ဂျာဂွါ
+Leopard = ကျားသစ်
+Shark = ငါးမန်း
+Crocodile = မိကျောင်း
+Bear = ဝက်ဝံ
+Lion = ခြင်္သေ့
 
+# --- Action Terms & Slang (အသုံးအနှုန်းများ) ---
+death roll = သေမင်းတမန် လှိမ့်ကွက်
+steak knives = စတီးဓား
+Game over = ရှောသွားပြီလေ
+bite force = ကိုက်အား
+PSI = ပီအက်စ်အိုင်
 
