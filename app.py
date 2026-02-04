@@ -144,12 +144,27 @@ def load_custom_dictionary():
 # ---------------------------------------------------------
 # 🔢 NUMBER & TEXT NORMALIZATION
 # ---------------------------------------------------------
+# 🔢 NUMBER & TEXT NORMALIZATION (UPDATED)
+# ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     try:
+        # 🔥 DECIMAL FIX: 3.3 -> သုံး ဒသမ သုံး
+        if "." in num_str:
+            parts = num_str.split(".")
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                left = num_to_burmese_spoken(parts[0]) # ရှေ့ခြမ်း (၃)
+                # နောက်ခြမ်း (၃) ကို တစ်လုံးချင်းဖတ်မလား၊ ဂဏန်းလိုဖတ်မလား
+                # ရိုးရိုးရှင်းရှင်း ဂဏန်းလိုပဲ ပြန်ခေါ်လိုက်မယ်
+                right = num_to_burmese_spoken(parts[1]) 
+                return f"{left} ဒသမ {right}"
+
+        # Normal Integer Logic
         num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
+        
         digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
+        
         def convert_chunk(number):
             parts = []
             if number >= 10000000: parts.append(convert_chunk(number // 10000000) + "ကုဋေ"); number %= 10000000
@@ -161,16 +176,53 @@ def num_to_burmese_spoken(num_str):
             if number >= 10: parts.append(digit_map[number // 10] + "ဆယ်"); number %= 10
             if number > 0: parts.append(digit_map[number])
             return "".join(parts)
+
         result = convert_chunk(n)
+        
+        # အသံထွက်ချောအောင် ပြင်ခြင်း
         result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
         if result.endswith("ထောင့်"): result = result[:-1] + "င်"
         if result.endswith("ရာ့"): result = result[:-1]
         if result.endswith("ဆယ့်"): result = result[:-1]
+        
         return result
     except: return num_str
 
 def normalize_text_for_tts(text):
     if not text: return ""
+    
+    # 1. Basic Symbol Cleaning
+    text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
+    
+    # 2. Pronunciation Fix (Dictionary Check)
+    pron_dict = load_pronunciation_dict()
+    # Sort keys by length (Longer first) to prevent partial replacement
+    # e.g., fix "40,000" before "4"
+    sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
+    
+    for original in sorted_keys:
+        fixed_sound = pron_dict[original]
+        pattern = re.compile(re.escape(original), re.IGNORECASE)
+        text = pattern.sub(fixed_sound, text)
+        
+    # 3. Pause Logic
+    text = text.replace("၊", ", ") 
+    text = text.replace("။", ". ")
+    text = text.replace("[p]", "... ") 
+        
+    # 4. 🔥 REGEX UPDATE FOR DECIMALS 🔥
+    # အရင်က \b\d+\b (ဂဏန်းသီးသန့်) ပဲ ရှာတယ်
+    # အခု \d+(\.\d+)? (ဒသမ ပါတာရော ရှာမယ်)
+    text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
+    
+    # 5. Fix "Lone Lauk Tae" pause issue specifically in code if Dict fails
+    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့") 
+    
+    # 6. Final Clean
+    text = text.replace("\n", " ")
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
     
     # 1. Basic Symbol Cleaning (မလိုတဲ့ သင်္ကေတတွေ ဖယ်မယ်)
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
@@ -231,6 +283,7 @@ VOICE_MODES = {
     "Normal": {"rate": "+0%", "pitch": "+0Hz"},
     "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
     "Recap": {"rate": "+5%", "pitch": "+0Hz"},
+    "Motivation": {"rate": "+10", "pitch": "+2Hz"},
 }
 
 def generate_audio_cli(text, lang, gender, mode_name, output_file, speed_multiplier=1.0):
