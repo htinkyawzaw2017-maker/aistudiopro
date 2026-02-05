@@ -255,7 +255,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
         
         # If it's Text -> Generate Audio with current settings
-                time.sleep(0.5) # Server မပိတ်အောင် ခဏနားမယ်
+        time.sleep(0.5) # Server မပိတ်အောင် ခဏနားမယ်
         chunk_filename = f"chunk_{chunk_idx}.mp3"
         rate_str = f"{current_rate:+d}%"
         pitch_str = f"{current_pitch:+d}Hz"
