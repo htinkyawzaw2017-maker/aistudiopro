@@ -716,13 +716,105 @@ with t1:
 
     if st.session_state.processed_video_path and "Video" in export_format:
         st.video(st.session_state.processed_video_path)
+    if st.session_state.final_script:
+        st.markdown("### 🎬 Script & Production")
+        
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            # ✨ Refine with Auto-Tagging
+            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
+                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
+                    prompt = f"""
+                    Act as a professional Myanmar Movie Recap Narrator. 
+                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
+                    Input Text: "{st.session_state.final_script}"
+                    **STRICT DUBBING & TAGGING RULES:**
+                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
+                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
+                    3. **FLOW:** Insert [p] every 2-3 sentences.
+                    4. **NO SUMMARIZATION:** Match the full length of the original content.
+                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
+                    """
+                    st.session_state.final_script = generate_with_retry(prompt)
+                    st.rerun()
+
+        with c_opt2:
+            if st.button("↩️ Reset Script", use_container_width=True):
+                st.session_state.final_script = st.session_state.raw_transcript
+                st.rerun()
+
+        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
+        
+        st.markdown("---")
+        st.markdown("#### ⚙️ Rendering Options")
+        
+        c_fmt, c_spd = st.columns([1, 1.2])
+        with c_fmt:
+            export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
+        with c_spd:
+            audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
+            video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
+
+        c_v1, c_v2, c_v3 = st.columns(3)
+        with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
+        with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
+        with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
+        
+        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
+        
+        auto_freeze = None; manual_freeze = None
+        if "Video" in export_format:
+            with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.checkbox("Every 30s"): auto_freeze = 30
+                    if st.checkbox("Every 60s"): auto_freeze = 60
+                with c2:
+                    manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
+
+        btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
+        
+        if st.button(btn_label, use_container_width=True):
+            p_bar = st.progress(0, text="🚀 Initializing...")
+            p_bar.progress(30, text="🔊 Generating Neural Speech...")
+            try:
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
+                st.session_state.processed_audio_path = "voice.mp3"
+            except Exception as e:
+                st.error(f"Audio Error: {e}"); st.stop()
+            
+            if "Audio" in export_format:
+                p_bar.progress(100, text="✅ Audio Generated!")
+            else:
+                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
+                input_vid = "input.mp4"
+                raw_vid_dur = get_duration(input_vid)
+                vid_dur = raw_vid_dur / video_speed 
+                aud_dur = get_duration("voice.mp3")
+
+                p_bar.progress(80, text="🎬 Merging & Finalizing...")
+                pts_val = 1.0 / video_speed
+                w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
+                if w_s % 2 != 0: w_s += 1
+                if h_s % 2 != 0: h_s += 1
+                
+                if aud_dur > vid_dur:
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"]
+                else:
+                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"]
+                
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                p_bar.progress(100, text="🎉 Video Complete!")
+                st.session_state.processed_video_path = "dubbed_final.mp4"
+
+    if st.session_state.processed_video_path and "Video" in export_format:
+        st.video(st.session_state.processed_video_path)
         with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
 
     if st.session_state.processed_audio_path:
         st.audio(st.session_state.processed_audio_path)
         with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
- 
     # === TAB 2: AUTO CAPTION ===
 with t2:
     st.subheader("📝 Auto Caption")
