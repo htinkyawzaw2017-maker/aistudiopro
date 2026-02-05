@@ -575,8 +575,6 @@ with t1:
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
-
-    
         
         # Duration Estimation
             
@@ -675,6 +673,35 @@ with t1:
                 st.rerun()
 
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
+
+            if st.session_state.final_script:
+        st.markdown("### 🎬 Script & Production")
+        
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            # ✨ Refine with Auto-Tagging
+            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
+                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
+                    prompt = f"""
+                    Act as a professional Myanmar Movie Recap Narrator. 
+                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
+                    Input Text: "{st.session_state.final_script}"
+                    **STRICT DUBBING & TAGGING RULES:**
+                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
+                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
+                    3. **FLOW:** Insert [p] every 2-3 sentences.
+                    4. **NO SUMMARIZATION:** Match the full length of the original content.
+                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
+                    """
+                    st.session_state.final_script = generate_with_retry(prompt)
+                    st.rerun()
+
+        with c_opt2:
+            if st.button("↩️ Reset Script", use_container_width=True):
+                st.session_state.final_script = st.session_state.raw_transcript
+                st.rerun()
+
+        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
         
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
@@ -741,6 +768,10 @@ with t1:
     if st.session_state.processed_video_path and "Video" in export_format:
         st.video(st.session_state.processed_video_path)
         with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
+
+    if st.session_state.processed_audio_path:
+        st.audio(st.session_state.processed_audio_path)
+        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
     
     # === TAB 2: AUTO CAPTION ===
