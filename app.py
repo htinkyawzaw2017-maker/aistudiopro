@@ -647,8 +647,8 @@ with t1:
 
                 p_bar.progress(80, text="🎬 Merging & Finalizing...")
 
-    if st.session_state.final_script:
-        st.markdown("### 🎬 Script & Production")
+        if st.session_state.final_script:
+            st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
@@ -742,10 +742,7 @@ with t1:
         st.video(st.session_state.processed_video_path)
         with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
 
-    if st.session_state.processed_audio_path:
-        st.audio(st.session_state.processed_audio_path)
-        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
-
+    
     # === TAB 2: AUTO CAPTION ===
 with t2:
     st.subheader("📝 Auto Caption")
