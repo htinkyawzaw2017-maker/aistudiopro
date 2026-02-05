@@ -1,6 +1,9 @@
-streamlit
+streamlitt
 google-generativeai
 edge-tts
 openai-whisper
 pydub
 requests
+google-cloud-texttospeech
+google-auth
+
