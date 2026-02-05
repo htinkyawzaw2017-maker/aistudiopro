@@ -352,46 +352,6 @@ def normalize_text_for_tts(text):
     text = re.sub(r'\s+', ' ', text).strip()
     
     return text
-        
-    # 4. 🔥 REGEX UPDATE FOR DECIMALS 🔥
-    # အရင်က \b\d+\b (ဂဏန်းသီးသန့်) ပဲ ရှာတယ်
-    # အခု \d+(\.\d+)? (ဒသမ ပါတာရော ရှာမယ်)
-    text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    
-    # 5. Fix "Lone Lauk Tae" pause issue specifically in code if Dict fails
-    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့") 
-    
-    # 6. Final Clean
-    text = text.replace("\n", " ")
-    text = re.sub(r'\s+', ' ', text).strip()
-    
-    return text
-    
-    # 1. Basic Symbol Cleaning (မလိုတဲ့ သင်္ကေတတွေ ဖယ်မယ်)
-    text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
-    
-    # 2. PRONUNCIATION FIX (အသံထွက် ပြင်ဆင်ခြင်း)
-    pron_dict = load_pronunciation_dict()
-    for original, fixed_sound in pron_dict.items():
-        pattern = re.compile(re.escape(original), re.IGNORECASE)
-        text = pattern.sub(fixed_sound, text)
-        
-    # 3. 🔥 PAUSE LOGIC (အဖြတ်အတောက် သင်ပေးခြင်း) 🔥
-    # မြန်မာ '၊' ကို English ',' (ကော်မာ) ပြောင်းမှ AI က ခဏရပ်တတ်တယ်
-    text = text.replace("၊", ", ") 
-    text = text.replace("။", ". ")
-    
-    # User က [p] လို့ရေးရင် အကြာကြီးရပ်မယ့် logic (ဥပမာ - ... ထည့်ပေးလိုက်ခြင်း)
-    text = text.replace("[p]", "... ") 
-        
-    # 4. Number Conversion
-    text = re.sub(r'\b\d+\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    
-    # 5. Remove Newlines (ဒါပေမဲ့ ပုဒ်ဖြတ်တွေ ကျန်ခဲ့မယ်)
-    text = text.replace("\n", " ")
-    text = re.sub(r'\s+', ' ', text).strip()
-    
-    return text
 
 # ---------------------------------------------------------
 # 🧠 AI ENGINE
@@ -577,7 +537,8 @@ with t1:
                 st.rerun()
         
         # Duration Estimation
-            
+        # 🔥 FIX: Added 'txt' definition here to prevent NameError
+        txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
