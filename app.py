@@ -578,35 +578,47 @@ with t1:
 
     if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
-        
-        c_opt1, c_opt2 = st.columns(2)
+
+                c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # 🔥 UPDATED PROMPT: RECAP STYLE + FULL LENGTH
+            # ✨ Refine Button
             if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
-                with st.spinner("Refining script to match video length..."):
+                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
+                    # 🔥 THE ULTIMATE AUTO-TAGGING & SYNC PROMPT
                     prompt = f"""
-                    Act as a professional Myanmar Movie Narrator.
-                    Rewrite the input text into **Burmese Recap Style**, but **KEEP THE FULL CONTENT**.
-                    
-                    Input: "{st.session_state.final_script}"
-                    
-                    **STRICT RULES:**
-                    1. **NO SUMMARIZATION:** Do NOT shorten the text. Translate every detail to match the video duration.
-                    2. **STYLE:** Use exciting "Recap/Storytelling" vocabulary but keep the meaning accurate.
-                    3. **CORRECTION:** Ensure 'Fall' is translated as 'ပြုတ်ကျ' (Not 'ထွက်ပြေး').
-                    4. **FORBIDDEN:** Do NOT use 'ဗျ', 'ရှင့်', 'သည်', '၏', '၎င်း'.
-                    5. **GOAL:** The script MUST be long enough to cover the original video.
+                    Act as a professional Myanmar Movie Recap Narrator. 
+                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
+
+                    Input Text: "{st.session_state.final_script}"
+
+                    **STRICT DUBBING & TAGGING RULES:**
+                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. Match the length of the original content exactly.
+                    2. **STYLE:** Professional Recap/Storytelling style. Use dramatic and engaging vocabulary.
+                    3. **AUTO-TAGGING (Essential):** Insert the following tags based on the context of the story:
+                       - [p] : Use this for dramatic pauses (e.g., after a shocking sentence).
+                       - [action] : Use for fast-paced, exciting, or intense scenes.
+                       - [sad] : Use for emotional, serious, or tragic moments.
+                       - [happy] : Use for positive, surprising, or energetic parts.
+                       - [whisper] : Use for secret or mysterious information.
+                    4. **FLOW:** Every 2-3 sentences, insert a [p] to allow the audience to breathe and watch the visuals.
+                    5. **NO SUMMARIZATION:** Translate every key point. If the video is 1 min, ensure the script is exactly 1 min long when spoken.
+                    6. **CORRECTION:** Ensure 'Fall' is 'ပြုတ်ကျ' and names are pronounced correctly as per the movie context.
+
+                    **OUTPUT FORMAT EXAMPLE:**
+                    [happy] ဟယ်လို အားလုံးပဲ မင်္ဂလာပါဗျာ။ ဒီနေ့မှာတော့ ကျွန်တော်တို့ [p] အားလုံး စောင့်မျှော်နေတဲ့ အက်ရှင်ကားကြီးကို တင်ဆက်ပေးတော့မှာပါ။ [action] ချက်ချင်းဆိုသလိုပဲ ရန်သူတွေက ဝိုင်းလာပြီး...
                     """
-                    # AI Call
+                    # AI Call (Must be inside the spinner block)
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
 
         with c_opt2:
-             if st.button("↩️ Reset Script", use_container_width=True): pass
-
-        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
+            # Reset Button
+            if st.button("↩️ Reset Script", use_container_width=True):
+                st.session_state.final_script = st.session_state.raw_transcript
+                st.rerun() 
         
         # Duration Estimation
+            
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
@@ -626,7 +638,7 @@ with t1:
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
-        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
+        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1., 0.01)
         
         # Render Button
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
