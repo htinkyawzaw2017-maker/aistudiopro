@@ -674,7 +674,7 @@ with t1:
 
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
 
-            if st.session_state.final_script:
+        if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
         
         c_opt1, c_opt2 = st.columns(2)
