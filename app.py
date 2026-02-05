@@ -1,3 +1,4 @@
+
 import warnings
 warnings.filterwarnings("ignore")
 import os
@@ -171,15 +172,11 @@ def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
         return True
     except: return False
 
-# Helper Functions နေရာမှာ ဒါလေး ပြန်ထည့်ပေးပါ
+# Helper Functions
 def check_requirements():
     if shutil.which("ffmpeg") is None:
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
         st.stop()
-
-# ---------------------------------------------------------
-# 🛠️ MISSING HELPER FUNCTIONS (Restore these)
-# ---------------------------------------------------------
 
 def get_duration(path):
     try:
@@ -270,8 +267,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
 # ---------------------------------------------------------
 # 🔢 NUMBER & TEXT NORMALIZATION
-# ---------------------------------------------------------
-# 🔢 NUMBER & TEXT NORMALIZATION (UPDATED)
 # ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     try:
@@ -536,23 +531,51 @@ with t1:
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
         
-        # Duration Estimation
-        # 🔥 FIX: Added 'txt' definition here to prevent NameError
+        # Duration Estimation (Fixed Variable Scope)
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
         
-                # Rendering Options
+        if st.session_state.final_script:
+            st.markdown("### 🎬 Script & Production")
+        
+        # SCRIPT REFINING & EDITOR (Removed Duplicates)
+        c_opt1, c_opt2 = st.columns(2)
+        with c_opt1:
+            # ✨ Refine with Auto-Tagging
+            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
+                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
+                    prompt = f"""
+                    Act as a professional Myanmar Movie Recap Narrator. 
+                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
+                    Input Text: "{st.session_state.final_script}"
+                    **STRICT DUBBING & TAGGING RULES:**
+                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
+                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
+                    3. **FLOW:** Insert [p] every 2-3 sentences.
+                    4. **NO SUMMARIZATION:** Match the full length of the original content.
+                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
+                    """
+                    st.session_state.final_script = generate_with_retry(prompt)
+                    st.rerun()
+
+        with c_opt2:
+            if st.button("↩️ Reset Script", use_container_width=True):
+                st.session_state.final_script = st.session_state.raw_transcript
+                st.rerun()
+
+        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
+
+        # Rendering Options
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
-        c_fmt, c_spd = st.columns([1, 1.2]) # Speed အကွက်ကို နည်းနည်း ပိုချဲ့ထားတယ်
+        c_fmt, c_spd = st.columns([1, 1.2]) 
         with c_fmt:
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
         with c_spd:
             audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
-            # 🔥 NEW: Video Speed Slider (0.5x မှ 4.0x အထိ 0.1 တိုးပြီး ချိန်နိုင်သည်)
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
@@ -562,7 +585,6 @@ with t1:
         
         zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
         
-        # 🔥 ADDING BACK: Freeze Frame Settings (ပျောက်နေသော အပိုင်း)
         auto_freeze = None; manual_freeze = None
         if "Video" in export_format:
             with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
@@ -595,118 +617,6 @@ with t1:
                 input_vid = "input.mp4"
                 
                 # Update Duration based on speed
-                raw_vid_dur = get_duration(input_vid)
-                vid_dur = raw_vid_dur / video_speed 
-                aud_dur = get_duration("voice.mp3")
-
-                # Freeze Frame Logic
-                if auto_freeze or manual_freeze:
-                    # (Freeze logic runs here if used)
-                    pass
-
-                p_bar.progress(80, text="🎬 Merging & Finalizing...")
-
-        if st.session_state.final_script:
-            st.markdown("### 🎬 Script & Production")
-        
-        c_opt1, c_opt2 = st.columns(2)
-        with c_opt1:
-            # ✨ Refine with Auto-Tagging
-            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
-                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
-                    prompt = f"""
-                    Act as a professional Myanmar Movie Recap Narrator. 
-                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
-                    Input Text: "{st.session_state.final_script}"
-                    **STRICT DUBBING & TAGGING RULES:**
-                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
-                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
-                    3. **FLOW:** Insert [p] every 2-3 sentences.
-                    4. **NO SUMMARIZATION:** Match the full length of the original content.
-                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
-                    """
-                    st.session_state.final_script = generate_with_retry(prompt)
-                    st.rerun()
-
-        with c_opt2:
-            if st.button("↩️ Reset Script", use_container_width=True):
-                st.session_state.final_script = st.session_state.raw_transcript
-                st.rerun()
-
-        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
-
-        if st.session_state.final_script:
-            st.markdown("### 🎬 Script & Production")
-        
-        c_opt1, c_opt2 = st.columns(2)
-        with c_opt1:
-            # ✨ Refine with Auto-Tagging
-            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
-                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
-                    prompt = f"""
-                    Act as a professional Myanmar Movie Recap Narrator. 
-                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
-                    Input Text: "{st.session_state.final_script}"
-                    **STRICT DUBBING & TAGGING RULES:**
-                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
-                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
-                    3. **FLOW:** Insert [p] every 2-3 sentences.
-                    4. **NO SUMMARIZATION:** Match the full length of the original content.
-                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
-                    """
-                    st.session_state.final_script = generate_with_retry(prompt)
-                    st.rerun()
-
-        with c_opt2:
-            if st.button("↩️ Reset Script", use_container_width=True):
-                st.session_state.final_script = st.session_state.raw_transcript
-                st.rerun()
-
-        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
-        
-        st.markdown("---")
-        st.markdown("#### ⚙️ Rendering Options")
-        
-        c_fmt, c_spd = st.columns([1, 1.2])
-        with c_fmt:
-            export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
-        with c_spd:
-            audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
-            video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
-
-        c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
-        with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
-        with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
-        
-        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
-        
-        auto_freeze = None; manual_freeze = None
-        if "Video" in export_format:
-            with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.checkbox("Every 30s"): auto_freeze = 30
-                    if st.checkbox("Every 60s"): auto_freeze = 60
-                with c2:
-                    manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
-
-        btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
-        
-        if st.button(btn_label, use_container_width=True):
-            p_bar = st.progress(0, text="🚀 Initializing...")
-            p_bar.progress(30, text="🔊 Generating Neural Speech...")
-            try:
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
-                st.session_state.processed_audio_path = "voice.mp3"
-            except Exception as e:
-                st.error(f"Audio Error: {e}"); st.stop()
-            
-            if "Audio" in export_format:
-                p_bar.progress(100, text="✅ Audio Generated!")
-            else:
-                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
-                input_vid = "input.mp4"
                 raw_vid_dur = get_duration(input_vid)
                 vid_dur = raw_vid_dur / video_speed 
                 aud_dur = get_duration("voice.mp3")
