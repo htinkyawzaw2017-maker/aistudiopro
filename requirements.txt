@@ -1,4 +1,4 @@
-streamlitt
+streamlit
 google-generativeai
 edge-tts
 openai-whisper
