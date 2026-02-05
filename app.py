@@ -24,7 +24,7 @@ from google.oauth2 import service_account
 # ---------------------------------------------------------
 # 🎨 UI SETUP (NEON SPACE THEME)
 # ---------------------------------------------------------
-st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -48,7 +48,13 @@ st.markdown("""
         text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
         margin-bottom: 20px;
     }
-    div[data-testid="stFileUploader"], div[data-testid="stExpander"], div[class="stTextArea"] {
+    div[data-testid="stFileUploader"] {
+        background-color: rgba(10, 25, 47, 0.9);
+        border: 1px solid #00d2ff;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    div[data-testid="stExpander"], div[class="stTextArea"] {
         background-color: rgba(10, 25, 47, 0.85);
         border: 1px solid #00d2ff;
         border-radius: 15px;
@@ -176,7 +182,7 @@ VOICE_MAP = {
     "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
 }
 GOOGLE_VOICE_MAP = {
-    "Burmese": {"Male": "my-MM-Standard-A", "Female": "my-MM-Standard-A"}, # Google Burmese is limited
+    "Burmese": {"Male": "my-MM-Standard-A", "Female": "my-MM-Standard-A"}, 
     "English": {"Male": "en-US-Neural2-D", "Female": "en-US-Neural2-F"},
 }
 VOICE_MODES = {
@@ -211,7 +217,6 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         client = texttospeech.TextToSpeechClient(credentials=creds)
         s_input = texttospeech.SynthesisInput(text=text)
         
-        # Determine Voice
         g_voice_name = GOOGLE_VOICE_MAP.get(lang, {}).get(gender, "en-US-Neural2-F")
         lang_code = "my-MM" if lang == "Burmese" else "en-US"
         
@@ -220,8 +225,6 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
             name=g_voice_name
         )
         
-        # Adjust Speed/Pitch (Google uses float 1.0, not percentage)
-        # edge rate "+10%" -> Google 1.1
         audio_config = texttospeech.AudioConfig(
             audio_encoding=texttospeech.AudioEncoding.MP3,
             speaking_rate=rate_val,
@@ -240,7 +243,6 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
     
-    # Calculate Base Params
     base_r_int = int(base_settings['rate'].replace('%', ''))
     base_p_int = int(base_settings['pitch'].replace('Hz', ''))
     slider_adj = int((base_speed - 1.0) * 100)
@@ -268,16 +270,10 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
-            # Convert edge params to Google params
-            # Rate: 0% -> 1.0, 10% -> 1.1
             g_rate = 1.0 + (current_rate / 100.0)
-            # Pitch: Hz is roughly semitones in Google? Not exactly, but approximation:
-            # Google Pitch is -20.0 to 20.0 semitones. Edge is Hz. 
-            # Let's approximate: 10Hz ~ 1 semitone for speech
             g_pitch = current_pitch / 10.0 
             success = generate_google_chunk(processed_text, lang, gender, g_rate, g_pitch, chunk_filename, st.session_state.google_creds)
         else:
-            # Use Edge TTS
             rate_str = f"{current_rate:+d}%"
             pitch_str = f"{current_pitch:+d}Hz"
             success = generate_edge_chunk(part, lang, gender, rate_str, pitch_str, chunk_filename)
@@ -285,7 +281,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if success:
             audio_segments.append(chunk_filename)
             chunk_idx += 1
-            time.sleep(0.2) # Prevent spamming
+            time.sleep(0.2)
 
     if not audio_segments: return False, "No audio generated"
     
@@ -409,8 +405,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 with st.sidebar:
     st.header("⚙️ Control Panel")
     
-    with st.expander("🔑 API & System Settings", expanded=True):
-        # Google AI Keys
+    # 🔥 FIXED: Moved JSON Uploader to TOP for visibility
+    st.markdown("☁️ **Google Cloud TTS (Optional):**")
+    gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Upload your GCP Key here to unlock Pro voices.")
+    if gcp_file:
+        try:
+            gcp_data = json.load(gcp_file)
+            st.session_state.google_creds = service_account.Credentials.from_service_account_info(gcp_data)
+            st.success("✅ GCP Key Loaded!")
+        except: st.error("❌ Invalid JSON File")
+
+    st.divider()
+
+    with st.expander("🔑 API Keys & Model", expanded=True):
         try:
             if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
             elif "GOOGLE_API_KEY" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEY"]
@@ -420,19 +427,6 @@ with st.sidebar:
         if api_key_input:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
         
-        st.divider()
-        
-        # 🔥 NEW: Google Cloud TTS JSON Upload
-        st.markdown("☁️ **Google Cloud TTS (Optional):**")
-        gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Required for Google Cloud Voices")
-        if gcp_file:
-            try:
-                gcp_data = json.load(gcp_file)
-                st.session_state.google_creds = service_account.Credentials.from_service_account_info(gcp_data)
-                st.success("✅ GCP Active")
-            except: st.error("❌ Invalid JSON")
-
-        st.divider()
         st.session_state.selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"], index=0)
 
     with st.expander("📚 Knowledge & Pronunciation", expanded=False):
@@ -453,38 +447,40 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 NEW: Transcription Language Logic
+        # 🔥 Language Selector
         source_lang = st.selectbox("Original Lang", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
         
-        if st.button("📝 Extract & Translate", use_container_width=True):
+        if st.button("📝 Extract & Process", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
             p_bar.progress(20, text="🎤 Transcribing Audio...")
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                # 🔥 NEW: Language Specific Transcription
+                # 1. Smart Language Detection
                 lang_code = "my" if source_lang == "Burmese" else "en"
-                if source_lang in ["Japanese"]: lang_code = "ja"
-                if source_lang in ["Chinese"]: lang_code = "zh"
-                if source_lang in ["Thai"]: lang_code = "th"
+                if source_lang == "Japanese": lang_code = "ja"
+                if source_lang == "Chinese": lang_code = "zh"
+                if source_lang == "Thai": lang_code = "th"
 
-                transcribe_options = {"language": lang_code} if source_lang != "English" else {} # English is default auto often works, but can force 'en'
-                if source_lang == "English": transcribe_options = {"language": "en"}
-
+                transcribe_options = {"language": lang_code}
                 raw = model.transcribe("temp.wav", **transcribe_options)['text']
                 st.session_state.raw_transcript = raw
                 
                 p_bar.progress(60, text="🧠 AI Processing...")
                 
-                # 🔥 NEW: Translation Logic (If source is already Burmese, just refine)
+                # 🔥 FIXED: Output Language Logic (Same as Source)
                 if source_lang == "Burmese":
-                    prompt = f"Refine this Burmese script for narration. Input: '{raw}'"
+                    prompt = f"Act as a Burmese editor. Refine this text for clarity. Do not translate. Input: '{raw}'"
+                elif source_lang == "English":
+                    prompt = f"Act as an English editor. Refine this text for clarity. Do not translate to Burmese. Keep it in English. Input: '{raw}'"
                 else:
-                    prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
+                    # For others, keep original or translate? User said "based on selected". 
+                    # Assuming they want the script in that language.
+                    prompt = f"Refine this {source_lang} script. Do not translate. Input: '{raw}'"
                 
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
@@ -500,10 +496,18 @@ with t1:
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            if st.button("✨ Refine: Recap Style", use_container_width=True):
+            # 🔥 Dynamic Refine Button
+            refine_label = f"✨ Refine: {source_lang} Recap Style"
+            if st.button(refine_label, use_container_width=True):
                 with st.spinner("Refining..."):
-                    prompt = f"""Act as a professional Myanmar Movie Recap Narrator. Rewrite: "{st.session_state.final_script}"
-                    RULES: 1. Use ~250 words/min. 2. Add [p], [action], [sad]. 3. No Summarization."""
+                    if source_lang == "English":
+                        prompt = f"""Act as a professional English Movie Narrator. Rewrite the text into an engaging Recap Script.
+                        RULES: 1. Keep it in English. 2. Add [p], [action], [sad]. 3. No Summarization. Input: "{st.session_state.final_script}" """
+                    else:
+                        # Default to Burmese logic for others or add more ifs
+                         prompt = f"""Act as a professional Myanmar Movie Recap Narrator. Rewrite: "{st.session_state.final_script}"
+                        RULES: 1. Use ~250 words/min. 2. Add [p], [action], [sad]. 3. No Summarization."""
+                    
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
 
@@ -517,7 +521,6 @@ with t1:
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
-        # 🔥 NEW: Engine Selection
         tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
         if tts_engine == "Google Cloud TTS (Pro)" and not st.session_state.google_creds:
             st.error("⚠️ Please upload 'service_account.json' in Settings Sidebar to use Google Cloud TTS.")
@@ -543,7 +546,6 @@ with t1:
             
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                # 🔥 Pass Engine Choice
                 generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", engine=tts_engine, base_speed=audio_speed)
                 st.session_state.processed_audio_path = "voice.mp3"
             except Exception as e:
@@ -559,12 +561,10 @@ with t1:
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                # Check Duration
                 vid_dur = get_duration(input_vid) / video_speed
                 aud_dur = get_duration("voice.mp3")
                 
                 cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"]
-                # Loop video if audio is longer
                 if aud_dur > vid_dur:
                     cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"]
 
