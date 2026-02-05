@@ -576,46 +576,7 @@ with t1:
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
 
-    if st.session_state.final_script:
-        st.markdown("### 🎬 Script & Production")
-        
-        with c_opt1:
-            c_opt1, c_opt2 = st.columns(2)
-            # ✨ Refine Button
-            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
-                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
-                    # 🔥 THE ULTIMATE AUTO-TAGGING & SYNC PROMPT
-                    prompt = f"""
-                    Act as a professional Myanmar Movie Recap Narrator. 
-                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
-
-                    Input Text: "{st.session_state.final_script}"
-
-                    **STRICT DUBBING & TAGGING RULES:**
-                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. Match the length of the original content exactly.
-                    2. **STYLE:** Professional Recap/Storytelling style. Use dramatic and engaging vocabulary.
-                    3. **AUTO-TAGGING (Essential):** Insert the following tags based on the context of the story:
-                       - [p] : Use this for dramatic pauses (e.g., after a shocking sentence).
-                       - [action] : Use for fast-paced, exciting, or intense scenes.
-                       - [sad] : Use for emotional, serious, or tragic moments.
-                       - [happy] : Use for positive, surprising, or energetic parts.
-                       - [whisper] : Use for secret or mysterious information.
-                    4. **FLOW:** Every 2-3 sentences, insert a [p] to allow the audience to breathe and watch the visuals.
-                    5. **NO SUMMARIZATION:** Translate every key point. If the video is 1 min, ensure the script is exactly 1 min long when spoken.
-                    6. **CORRECTION:** Ensure 'Fall' is 'ပြုတ်ကျ' and names are pronounced correctly as per the movie context.
-
-                    **OUTPUT FORMAT EXAMPLE:**
-                    [happy] ဟယ်လို အားလုံးပဲ မင်္ဂလာပါဗျာ။ ဒီနေ့မှာတော့ ကျွန်တော်တို့ [p] အားလုံး စောင့်မျှော်နေတဲ့ အက်ရှင်ကားကြီးကို တင်ဆက်ပေးတော့မှာပါ။ [action] ချက်ချင်းဆိုသလိုပဲ ရန်သူတွေက ဝိုင်းလာပြီး...
-                    """
-                    # AI Call (Must be inside the spinner block)
-                    st.session_state.final_script = generate_with_retry(prompt)
-                    st.rerun()
-
-        with c_opt2:
-            # Reset Button
-            if st.button("↩️ Reset Script", use_container_width=True):
-                st.session_state.final_script = st.session_state.raw_transcript
-                st.rerun() 
+    
         
         # Duration Estimation
             
@@ -685,37 +646,7 @@ with t1:
                     pass
 
                 p_bar.progress(80, text="🎬 Merging & Finalizing...")
-                w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
-                if w_s % 2 != 0: w_s += 1
-                if h_s % 2 != 0: h_s += 1
-                
-                # Video Speed Filter PTS calculation
-                pts_val = 1.0 / video_speed
-                
-                # 🔥 SMART SYNC COMMAND (With Video Speed Adjustment)
-                if aud_dur > vid_dur:
-                    # Audio ပိုရှည်ရင် Video ကို Speed ချိန်ပြီးမှ Loop ပတ်မယ်
-                    cmd = [
-                        'ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid,
-                        '-i', "voice.mp3",
-                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]",
-                        '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
-                    ]
-                else:
-                    # Audio တိုရင် Speed ချိန်ထားတဲ့ Video အတိုင်း အဆုံးထိသွားမယ်
-                    cmd = [
-                        'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
-                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]",
-                        '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"
-                    ]
-                
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                p_bar.progress(100, text="🎉 Video Complete!")
-                st.session_state.processed_video_path = "dubbed_final.mp4"
-                st.success("Dubbing Complete!")
 
-    if st.session_state.processed_video_path and "Video" in export_format:
-        st.video(st.session_state.processed_video_path)
     if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
         
