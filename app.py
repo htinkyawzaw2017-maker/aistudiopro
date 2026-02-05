@@ -164,13 +164,26 @@ def load_pronunciation_dict():
 
 def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
     if not text.strip(): return False
-    processed_text = normalize_text_for_tts(text) # Pronunciation & Pause logic applied here
-    try:
-        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
-        cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL)
-        return True
-    except: return False
+    processed_text = normalize_text_for_tts(text) 
+    
+    voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+    cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
+
+    # 🔥 FIX: Retry Logic (၃ ခါအထိ ကြိုးစားမည်)
+    for attempt in range(3):
+        try:
+            # Run command and check for errors
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            
+            # File ထွက်မထွက် စစ်မယ် (Size 0 ဖြစ်နေရင် မအောင်မြင်ဘူး)
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                return True # အောင်မြင်ရင် ပြီးမယ်
+        except:
+            time.sleep(1) # Error တက်ရင် ၁ စက္ကန့်နားပြီး ပြန်လုပ်မယ်
+            continue
+
+    return False # ၃ ခါလုပ်လို့မရမှ လက်လျှော့မယ်
+
 
 # Helper Functions
 def check_requirements():
@@ -237,8 +250,12 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
             current_rate = base_r + emo_r
             current_pitch = base_p + emo_p
             continue # Tag itself is not spoken
+
+                
+
         
         # If it's Text -> Generate Audio with current settings
+                time.sleep(0.5) # Server မပိတ်အောင် ခဏနားမယ်
         chunk_filename = f"chunk_{chunk_idx}.mp3"
         rate_str = f"{current_rate:+d}%"
         pitch_str = f"{current_pitch:+d}Hz"
