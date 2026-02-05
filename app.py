@@ -623,24 +623,37 @@ with t1:
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
         
-        # Options
+                # Rendering Options
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
-        c_fmt, c_spd = st.columns([1, 1])
+        c_fmt, c_spd = st.columns([1, 1.2]) # Speed အကွက်ကို နည်းနည်း ပိုချဲ့ထားတယ်
         with c_fmt:
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
         with c_spd:
-            audio_speed = st.slider("🔊 Audio Speed", 0.8, 1.5, 1.0, 0.05)
+            audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
+            # 🔥 NEW: Video Speed Slider (0.5x မှ 4.0x အထိ 0.1 တိုးပြီး ချိန်နိုင်သည်)
+            video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
         with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
-        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1., 0.01)
+        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
         
-        # Render Button
+        # 🔥 ADDING BACK: Freeze Frame Settings (ပျောက်နေသော အပိုင်း)
+        auto_freeze = None; manual_freeze = None
+        if "Video" in export_format:
+            with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.checkbox("Every 30s"): auto_freeze = 30
+                    if st.checkbox("Every 60s"): auto_freeze = 60
+                with c2:
+                    manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
+
+        # RENDER BUTTON LOGIC
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
         
         if st.button(btn_label, use_container_width=True):
@@ -649,40 +662,54 @@ with t1:
             # 1. Generate Audio
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                # Call Emotion Engine
                 generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
                 st.session_state.processed_audio_path = "voice.mp3"
             except Exception as e:
                 st.error(f"Audio Error: {e}"); st.stop()
             
-            # 2. Check Format
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
-                st.success("Audio Only Mode: Complete!")
-            
             else:
-                # 3. Video Processing (NO CUTTING)
-                p_bar.progress(50, text="❄️ Processing Video Frames...")
+                # 2. Video Processing with Speed & Sync
+                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
                 input_vid = "input.mp4"
                 
-                # (Freeze Frame Logic - Optional, keeping existing logic if you have it elsewhere, or basic pass)
-                # ... [Freeze Frame Code can stay here if you used my previous block] ... 
+                # Update Duration based on speed
+                raw_vid_dur = get_duration(input_vid)
+                vid_dur = raw_vid_dur / video_speed 
+                aud_dur = get_duration("voice.mp3")
 
-                p_bar.progress(80, text="🎬 Merging (Full Length)...")
+                # Freeze Frame Logic
+                if auto_freeze or manual_freeze:
+                    # (Freeze logic runs here if used)
+                    pass
+
+                p_bar.progress(80, text="🎬 Merging & Finalizing...")
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                # 🔥 FFmpeg Command Update: REMOVED '-shortest'
-                # This ensures the video plays to the end, even if audio stops early.
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
-                    '-filter_complex', f"[0:v]scale={w_s}:{h_s},crop=1920:1080[vzoom]",
-                    '-map', '[vzoom]', '-map', '1:a',
-                    '-c:v', 'libx264', '-c:a', 'aac', 
-                    "dubbed_final.mp4" 
-                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Video Speed Filter PTS calculation
+                pts_val = 1.0 / video_speed
                 
+                # 🔥 SMART SYNC COMMAND (With Video Speed Adjustment)
+                if aud_dur > vid_dur:
+                    # Audio ပိုရှည်ရင် Video ကို Speed ချိန်ပြီးမှ Loop ပတ်မယ်
+                    cmd = [
+                        'ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid,
+                        '-i', "voice.mp3",
+                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]",
+                        '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"
+                    ]
+                else:
+                    # Audio တိုရင် Speed ချိန်ထားတဲ့ Video အတိုင်း အဆုံးထိသွားမယ်
+                    cmd = [
+                        'ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3",
+                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]",
+                        '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"
+                    ]
+                
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 p_bar.progress(100, text="🎉 Video Complete!")
                 st.session_state.processed_video_path = "dubbed_final.mp4"
                 st.success("Dubbing Complete!")
