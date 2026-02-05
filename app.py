@@ -579,7 +579,7 @@ with t1:
     if st.session_state.final_script:
         st.markdown("### 🎬 Script & Production")
 
-                c_opt1, c_opt2 = st.columns(2)
+            c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
             # ✨ Refine Button
             if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
