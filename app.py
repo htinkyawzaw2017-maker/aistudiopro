@@ -1,4 +1,3 @@
-
 import warnings
 warnings.filterwarnings("ignore")
 import os
@@ -18,6 +17,10 @@ import requests
 import textwrap
 import math
 
+# 🔥 NEW: Google Cloud Imports
+from google.cloud import texttospeech
+from google.oauth2 import service_account
+
 # ---------------------------------------------------------
 # 🎨 UI SETUP (NEON SPACE THEME)
 # ---------------------------------------------------------
@@ -25,7 +28,6 @@ st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout=
 
 st.markdown("""
     <style>
-    /* 1. Global Background (Space Theme) */
     .stApp {
         background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
         background-attachment: fixed;
@@ -33,12 +35,8 @@ st.markdown("""
         background-position: center;
         color: #e0e0e0;
     }
-    
-    /* 2. Hide Standard Header/Footer */
     header {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* 3. NEON Title Style */
     .main-header {
         font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
@@ -50,18 +48,14 @@ st.markdown("""
         text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
         margin-bottom: 20px;
     }
-    
-    /* 4. Custom Containers (Glassmorphism + Neon Border) */
     div[data-testid="stFileUploader"], div[data-testid="stExpander"], div[class="stTextArea"] {
-        background-color: rgba(10, 25, 47, 0.85); /* Semi-transparent dark blue */
+        background-color: rgba(10, 25, 47, 0.85);
         border: 1px solid #00d2ff;
         border-radius: 15px;
         padding: 15px;
         box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
         backdrop-filter: blur(5px);
     }
-    
-    /* 5. Glowing Buttons */
     .stButton > button {
         background: linear-gradient(45deg, #ff00cc, #3333ff);
         color: white;
@@ -76,25 +70,19 @@ st.markdown("""
         transform: scale(1.05);
         box-shadow: 0 0 30px rgba(255, 0, 204, 0.7);
     }
-
-   /* 6. Text Inputs & Select Boxes (Fix for Visibility) */
     input, textarea, select, div[data-baseweb="select"] > div {
         background-color: rgba(10, 25, 47, 0.9) !important;
-        color: #ffffff !important; /* စာလုံးအဖြူ */
+        color: #ffffff !important;
         border: 1px solid #00d2ff !important;
         border-radius: 8px !important;
     }
-    /* Dropdown စာလုံးများအတွက် */
     div[role="listbox"] ul {
         background-color: #050b14 !important;
         color: white !important;
     }
     p, label {
-        color: #e0e0e0 !important; /* Label စာလုံးများ */
+        color: #e0e0e0 !important;
     }
-    }
-
-    /* 7. Tabs Styling */
     div[data-baseweb="tab-list"] {
         background-color: rgba(0,0,0,0.5);
         border-radius: 15px;
@@ -111,19 +99,15 @@ st.markdown("""
         border-radius: 10px;
     }
     </style>
-    
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
-    
 """, unsafe_allow_html=True)
 
-# Title with Icon
 st.markdown("""
 <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
     <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="80"/>
     <div class="main-header"></div>
 </div>
 """, unsafe_allow_html=True)
-
 
 # ---------------------------------------------------------
 # 💾 STATE MANAGEMENT
@@ -134,58 +118,30 @@ if 'processed_video_path' not in st.session_state: st.session_state.processed_vi
 if 'processed_audio_path' not in st.session_state: st.session_state.processed_audio_path = None
 if 'caption_video_path' not in st.session_state: st.session_state.caption_video_path = None
 if 'api_keys' not in st.session_state: st.session_state.api_keys = []
+if 'google_creds' not in st.session_state: st.session_state.google_creds = None
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
-# 🔊 SIMPLE AUDIO GENERATOR (For single chunk)
 
-# --- LOADERS FOR DICTIONARIES ---
 def load_custom_dictionary():
-    # For Gemini (Text Generation)
     dict_file = "dictionary.txt"
     if os.path.exists(dict_file):
         with open(dict_file, "r", encoding="utf-8") as f: return f.read()
     return ""
 
 def load_pronunciation_dict():
-    # Pronunciation Dictionary Loader
     pron_file = "pronunciation.txt"
     replacements = {}
     if os.path.exists(pron_file):
         with open(pron_file, "r", encoding="utf-8") as f:
             for line in f:
-                # "Original = Sound" ပုံစံကို ရှာပြီး ခွဲခြားခြင်း
                 if "=" in line and not line.startswith("#"):
                     parts = line.split("=")
                     if len(parts) == 2:
                         replacements[parts[0].strip()] = parts[1].strip()
     return replacements
 
-def generate_single_chunk(text, lang, gender, rate_str, pitch_str, output_file):
-    if not text.strip(): return False
-    processed_text = normalize_text_for_tts(text) 
-    
-    voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
-    cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
-
-    # 🔥 FIX: Retry Logic (၃ ခါအထိ ကြိုးစားမည်)
-    for attempt in range(3):
-        try:
-            # Run command and check for errors
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            
-            # File ထွက်မထွက် စစ်မယ် (Size 0 ဖြစ်နေရင် မအောင်မြင်ဘူး)
-            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                return True # အောင်မြင်ရင် ပြီးမယ်
-        except:
-            time.sleep(1) # Error တက်ရင် ၁ စက္ကန့်နားပြီး ပြန်လုပ်မယ်
-            continue
-
-    return False # ၃ ခါလုပ်လို့မရမှ လက်လျှော့မယ်
-
-
-# Helper Functions
 def check_requirements():
     if shutil.which("ffmpeg") is None:
         st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
@@ -213,22 +169,85 @@ def load_whisper_safe():
     except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
 # ---------------------------------------------------------
+# 🔊 DUAL AUDIO ENGINE (EDGE & GOOGLE)
+# ---------------------------------------------------------
+VOICE_MAP = {
+    "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
+    "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
+}
+GOOGLE_VOICE_MAP = {
+    "Burmese": {"Male": "my-MM-Standard-A", "Female": "my-MM-Standard-A"}, # Google Burmese is limited
+    "English": {"Male": "en-US-Neural2-D", "Female": "en-US-Neural2-F"},
+}
+VOICE_MODES = {
+    "Normal": {"rate": "+0%", "pitch": "+0Hz"},
+    "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
+    "Recap": {"rate": "+5%", "pitch": "+0Hz"},
+    "Motivation": {"rate": "+10", "pitch": "+2Hz"},
+}
+EMOTION_MAP = {
+    "[normal]": {"rate": "+0%", "pitch": "+0Hz"},
+    "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},
+    "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},
+    "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},
+    "[action]": {"rate": "+30%", "pitch": "+0Hz"},
+    "[whisper]": {"rate": "-10%", "pitch": "-20Hz"},
+}
 
-# 🧠 SMART EMOTION AUDIO ENGINE (Parses tags and merges audio)
-def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, base_speed=1.0):
-    # 1. Default Settings from Base Mode
+# 1. Edge TTS Generator (With Retry)
+def generate_edge_chunk(text, lang, gender, rate_str, pitch_str, output_file):
+    voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
+    cmd = ["edge-tts", "--voice", voice_id, "--text", text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
+    for attempt in range(3):
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0: return True
+        except: time.sleep(1); continue
+    return False
+
+# 2. Google Cloud TTS Generator
+def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, creds):
+    try:
+        client = texttospeech.TextToSpeechClient(credentials=creds)
+        s_input = texttospeech.SynthesisInput(text=text)
+        
+        # Determine Voice
+        g_voice_name = GOOGLE_VOICE_MAP.get(lang, {}).get(gender, "en-US-Neural2-F")
+        lang_code = "my-MM" if lang == "Burmese" else "en-US"
+        
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=lang_code,
+            name=g_voice_name
+        )
+        
+        # Adjust Speed/Pitch (Google uses float 1.0, not percentage)
+        # edge rate "+10%" -> Google 1.1
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=rate_val,
+            pitch=pitch_val
+        )
+
+        response = client.synthesize_speech(input=s_input, voice=voice, audio_config=audio_config)
+        with open(output_file, "wb") as out:
+            out.write(response.audio_content)
+        return True
+    except Exception as e:
+        print(f"Google TTS Error: {e}")
+        return False
+
+# 3. Main Audio Logic (Switchable)
+def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
-    current_rate = int(base_settings['rate'].replace('%', ''))
-    current_pitch = int(base_settings['pitch'].replace('Hz', ''))
     
-    # Apply Slider Speed to Base Rate
+    # Calculate Base Params
+    base_r_int = int(base_settings['rate'].replace('%', ''))
+    base_p_int = int(base_settings['pitch'].replace('Hz', ''))
     slider_adj = int((base_speed - 1.0) * 100)
-    current_rate += slider_adj
+    current_rate = base_r_int + slider_adj
+    current_pitch = base_p_int
 
-    # 2. Split Text by Tags (e.g., [sad], [happy])
-    # Regex to capture tags like [sad] and keep them as separators
     parts = re.split(r'(\[.*?\])', full_text)
-    
     audio_segments = []
     chunk_idx = 0
 
@@ -236,74 +255,67 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         part = part.strip()
         if not part: continue
 
-        # Check if this part is a Tag
         if part.lower() in EMOTION_MAP:
-            # Update settings for NEXT chunks
             emo = EMOTION_MAP[part.lower()]
-            # Reset to base first, then apply emotion offset
             base_r = int(base_settings['rate'].replace('%', '')) + slider_adj
             base_p = int(base_settings['pitch'].replace('Hz', ''))
-            
-            emo_r = int(emo['rate'].replace('%', ''))
-            emo_p = int(emo['pitch'].replace('Hz', ''))
-            
-            current_rate = base_r + emo_r
-            current_pitch = base_p + emo_p
-            continue # Tag itself is not spoken
-
-                
-
+            current_rate = base_r + int(emo['rate'].replace('%', ''))
+            current_pitch = base_p + int(emo['pitch'].replace('Hz', ''))
+            continue
         
-        # If it's Text -> Generate Audio with current settings
-        time.sleep(0.5) # Server မပိတ်အောင် ခဏနားမယ်
         chunk_filename = f"chunk_{chunk_idx}.mp3"
-        rate_str = f"{current_rate:+d}%"
-        pitch_str = f"{current_pitch:+d}Hz"
+        processed_text = normalize_text_for_tts(part)
         
-        success = generate_single_chunk(part, lang, gender, rate_str, pitch_str, chunk_filename)
+        success = False
+        if engine == "Google Cloud TTS" and st.session_state.google_creds:
+            # Convert edge params to Google params
+            # Rate: 0% -> 1.0, 10% -> 1.1
+            g_rate = 1.0 + (current_rate / 100.0)
+            # Pitch: Hz is roughly semitones in Google? Not exactly, but approximation:
+            # Google Pitch is -20.0 to 20.0 semitones. Edge is Hz. 
+            # Let's approximate: 10Hz ~ 1 semitone for speech
+            g_pitch = current_pitch / 10.0 
+            success = generate_google_chunk(processed_text, lang, gender, g_rate, g_pitch, chunk_filename, st.session_state.google_creds)
+        else:
+            # Use Edge TTS
+            rate_str = f"{current_rate:+d}%"
+            pitch_str = f"{current_pitch:+d}Hz"
+            success = generate_edge_chunk(part, lang, gender, rate_str, pitch_str, chunk_filename)
+        
         if success:
             audio_segments.append(chunk_filename)
             chunk_idx += 1
+            time.sleep(0.2) # Prevent spamming
 
-    # 3. Merge All Chunks using FFmpeg
     if not audio_segments: return False, "No audio generated"
     
     concat_list = "audio_concat.txt"
     with open(concat_list, "w") as f:
-        for seg in audio_segments:
-            f.write(f"file '{seg}'\n")
+        for seg in audio_segments: f.write(f"file '{seg}'\n")
             
     try:
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Cleanup temp files
         for seg in audio_segments: os.remove(seg)
         os.remove(concat_list)
         return True, "Success"
-    except Exception as e:
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
 # ---------------------------------------------------------
-# 🔢 NUMBER & TEXT NORMALIZATION
+# 🔢 TEXT NORMALIZATION
 # ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     try:
-        # 🔥 DECIMAL FIX: 3.3 -> သုံး ဒသမ သုံး
         if "." in num_str:
             parts = num_str.split(".")
             if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                left = num_to_burmese_spoken(parts[0]) # ရှေ့ခြမ်း (၃)
-                # နောက်ခြမ်း (၃) ကို တစ်လုံးချင်းဖတ်မလား၊ ဂဏန်းလိုဖတ်မလား
-                # ရိုးရိုးရှင်းရှင်း ဂဏန်းလိုပဲ ပြန်ခေါ်လိုက်မယ်
+                left = num_to_burmese_spoken(parts[0])
                 right = num_to_burmese_spoken(parts[1]) 
                 return f"{left} ဒသမ {right}"
 
-        # Normal Integer Logic
         num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
-        
         digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
-        
         def convert_chunk(number):
             parts = []
             if number >= 10000000: parts.append(convert_chunk(number // 10000000) + "ကုဋေ"); number %= 10000000
@@ -315,54 +327,29 @@ def num_to_burmese_spoken(num_str):
             if number >= 10: parts.append(digit_map[number // 10] + "ဆယ်"); number %= 10
             if number > 0: parts.append(digit_map[number])
             return "".join(parts)
-
         result = convert_chunk(n)
-        
-        # အသံထွက်ချောအောင် ပြင်ခြင်း
         result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
         if result.endswith("ထောင့်"): result = result[:-1] + "င်"
         if result.endswith("ရာ့"): result = result[:-1]
         if result.endswith("ဆယ့်"): result = result[:-1]
-        
         return result
     except: return num_str
 
 def normalize_text_for_tts(text):
     if not text: return ""
-    
-    # 🔥 STEP 0: NUCLEAR COMMA REMOVAL (ဂဏန်းကြားက ကော်မာများကို အရင်ဆုံး သတ်မယ်)
-    # 20,000 -> 20000 ဖြစ်သွားအောင် လုပ်သော အဆင့်
     text = re.sub(r'(?<=\d),(?=\d)', '', text)
-
-    # 1. Basic Symbol Cleaning
     text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
-    
-    # 2. Pronunciation Fix (Dictionary Check)
     pron_dict = load_pronunciation_dict()
     sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
-    
     for original in sorted_keys:
         fixed_sound = pron_dict[original]
         pattern = re.compile(re.escape(original), re.IGNORECASE)
         text = pattern.sub(fixed_sound, text)
-        
-    # 3. Pause Logic
-    text = text.replace("၊", ", ") 
-    text = text.replace("။", ". ")
-    text = text.replace("[p]", "... ") 
-        
-    # 4. Number Conversion (Regex Updated)
-    # \d+ ဆိုတာ ကော်မာမရှိတော့တဲ့ ဂဏန်းတွေကို ရှာတာပါ
+    text = text.replace("၊", ", ").replace("။", ". ").replace("[p]", "... ") 
     text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    
-    # 5. Fix "Lone Lauk Tae" (Specific Patch)
-    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့") 
-    text = text.replace("လုံလောက်သော", "လုံလောက်တဲ့")
-    
-    # 6. Final Clean
+    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့").replace("လုံလောက်သော", "လုံလောက်တဲ့")
     text = text.replace("\n", " ")
     text = re.sub(r'\s+', ' ', text).strip()
-    
     return text
 
 # ---------------------------------------------------------
@@ -374,7 +361,6 @@ def get_model(api_key, model_name):
 
 def generate_with_retry(prompt):
     keys = st.session_state.api_keys
-    # 🔥 AI MODEL SELECTION USAGE
     model_name = st.session_state.get("selected_model", "gemini-1.5-flash")
     custom_rules = load_custom_dictionary()
     if custom_rules:
@@ -386,44 +372,6 @@ def generate_with_retry(prompt):
             return response.text
         except: continue
     return "AI Error: All keys failed."
-
-# ---------------------------------------------------------
-# 🔊 AUDIO ENGINE
-# ---------------------------------------------------------
-# 🔥 EMOTION SETTINGS (Tag -> Pitch/Rate Adjustments)
-EMOTION_MAP = {
-    "[normal]": {"rate": "+0%", "pitch": "+0Hz"},
-    "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},  # နှေးပြီး အသံနိမ့်မယ်
-    "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},   # မြန်ပြီး အသံမာမယ်
-    "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},  # သွက်ပြီး အသံမြင့်မယ်
-    "[action]": {"rate": "+30%", "pitch": "+0Hz"},   # အက်ရှင်ခန်း လိုမျိုး အရမ်းမြန်မယ်
-    "[whisper]": {"rate": "-10%", "pitch": "-20Hz"}, # တိုးတိုးလေး ပြောသလို
-}
-
-VOICE_MAP = {
-    "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
-    "English": {"Male": "en-US-ChristopherNeural", "Female": "en-US-AriaNeural"},
-}
-VOICE_MODES = {
-    "Normal": {"rate": "+0%", "pitch": "+0Hz"},
-    "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
-    "Recap": {"rate": "+5%", "pitch": "+0Hz"},
-    "Motivation": {"rate": "+10", "pitch": "+2Hz"},
-}
-
-def generate_audio_cli(text, lang, gender, mode_name, output_file, speed_multiplier=1.0):
-    if not text.strip(): return False, "Empty text"
-    processed_text = normalize_text_for_tts(text)
-    try:
-        voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
-        settings = VOICE_MODES.get(mode_name, VOICE_MODES["Normal"])
-        base_rate = int(settings['rate'].replace('%', ''))
-        slider_rate = int((speed_multiplier - 1.0) * 100)
-        final_rate_str = f"{base_rate + slider_rate:+d}%"
-        cmd = ["edge-tts", "--voice", voice_id, "--text", processed_text, f"--rate={final_rate_str}", f"--pitch={settings['pitch']}", "--write-media", output_file]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL)
-        return True, "Success"
-    except Exception as e: return False, str(e)
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE
@@ -456,70 +404,47 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return filename
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI & SIDEBAR (UPDATED)
+# 🖥️ MAIN UI & SIDEBAR
 # ---------------------------------------------------------
-st.markdown("""<div class="main-header">🎬 Myanmar AI Studio Pro</div>""", unsafe_allow_html=True)
-
 with st.sidebar:
     st.header("⚙️ Control Panel")
     
-    # 🔥 DROPDOWN MENU BAR (EXPANDER)
     with st.expander("🔑 API & System Settings", expanded=True):
-        # 1. API KEY (HIDDEN PASSWORD MODE)
+        # Google AI Keys
         try:
             if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
             elif "GOOGLE_API_KEY" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEY"]
             else: default_keys = ""
         except: default_keys = ""
-        
-        api_key_input = st.text_input("API Keys (Comma separated)", value=default_keys, type="password", help="Enter multiple keys separated by comma for auto-rotation")
-        
+        api_key_input = st.text_input("Gemini API Keys", value=default_keys, type="password")
         if api_key_input:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-            st.success(f"✅ {len(st.session_state.api_keys)} Keys Loaded")
-        else: st.session_state.api_keys = []
         
         st.divider()
         
-        # 2. AI MODEL SELECTOR (INCLUDED 2.0 FLASH)
-        st.markdown("🤖 **Select AI Model:**")
-        st.session_state.selected_model = st.selectbox(
-            "Model Version",
-            ["gemini-2.5-flash", "gemini-2.0-flash-exp"],
-            index=0,
-            label_visibility="collapsed"
-        )
-        st.caption("Tip: Use '2.0-flash-exp' for better logic.")
-        
-    # 3. AUTO-LOAD KNOWLEDGE BASE (No Upload Needed)
+        # 🔥 NEW: Google Cloud TTS JSON Upload
+        st.markdown("☁️ **Google Cloud TTS (Optional):**")
+        gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Required for Google Cloud Voices")
+        if gcp_file:
+            try:
+                gcp_data = json.load(gcp_file)
+                st.session_state.google_creds = service_account.Credentials.from_service_account_info(gcp_data)
+                st.success("✅ GCP Active")
+            except: st.error("❌ Invalid JSON")
+
+        st.divider()
+        st.session_state.selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"], index=0)
+
     with st.expander("📚 Knowledge & Pronunciation", expanded=False):
         st.info("📂 System is using internal files.")
-
-        # Check Dictionary.txt
-        if os.path.exists("dictionary.txt"):
-            st.success("✅ dictionary.txt: Active")
-        else:
-            st.error("❌ dictionary.txt: Missing")
-
-        st.divider()
-
-        # Check Pronunciation.txt
-        if os.path.exists("pronunciation.txt"):
-            st.success("✅ pronunciation.txt: Active")
-        else:
-            st.error("❌ pronunciation.txt: Missing")
-            
-        if st.button("🔄 Reload Files"):
-            st.rerun()
-
+        if st.button("🔄 Reload Files"): st.rerun()
 
     if st.button("🔴 Reset System", use_container_width=True):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
-if not st.session_state.api_keys: st.warning("⚠️ Enter API Keys in Settings"); st.stop()
+if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys"); st.stop()
 
-# 🔥 TABS AS BOXES (Buttons)
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
@@ -528,7 +453,8 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        source_lang = st.selectbox("Original Lang", ["English", "Japanese", "Chinese", "Thai"])
+        # 🔥 NEW: Transcription Language Logic
+        source_lang = st.selectbox("Original Lang", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
@@ -540,15 +466,30 @@ with t1:
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                raw = model.transcribe("temp.wav")['text']
+                # 🔥 NEW: Language Specific Transcription
+                lang_code = "my" if source_lang == "Burmese" else "en"
+                if source_lang in ["Japanese"]: lang_code = "ja"
+                if source_lang in ["Chinese"]: lang_code = "zh"
+                if source_lang in ["Thai"]: lang_code = "th"
+
+                transcribe_options = {"language": lang_code} if source_lang != "English" else {} # English is default auto often works, but can force 'en'
+                if source_lang == "English": transcribe_options = {"language": "en"}
+
+                raw = model.transcribe("temp.wav", **transcribe_options)['text']
                 st.session_state.raw_transcript = raw
-                p_bar.progress(60, text="🧠 AI Translating...")
-                prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
+                
+                p_bar.progress(60, text="🧠 AI Processing...")
+                
+                # 🔥 NEW: Translation Logic (If source is already Burmese, just refine)
+                if source_lang == "Burmese":
+                    prompt = f"Refine this Burmese script for narration. Input: '{raw}'"
+                else:
+                    prompt = f"Translate {source_lang} to Burmese. Input: '{raw}'. Rules: Keep Proper Nouns in English."
+                
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
         
-        # Duration Estimation (Fixed Variable Scope)
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
@@ -557,23 +498,12 @@ with t1:
         if st.session_state.final_script:
             st.markdown("### 🎬 Script & Production")
         
-        # SCRIPT REFINING & EDITOR (Removed Duplicates)
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # ✨ Refine with Auto-Tagging
-            if st.button("✨ Refine: Recap Style (Full Length)", use_container_width=True):
-                with st.spinner("Refining with Auto-Tagging & Sync Logic..."):
-                    prompt = f"""
-                    Act as a professional Myanmar Movie Recap Narrator. 
-                    Your goal is to rewrite the input text into an engaging Recap Script that fits the exact duration of the video.
-                    Input Text: "{st.session_state.final_script}"
-                    **STRICT DUBBING & TAGGING RULES:**
-                    1. **TIME MATCHING:** Use approximately 250 Burmese words per 1 minute of video. 
-                    2. **AUTO-TAGGING:** Insert [p], [action], [sad], [happy], [whisper] based on context.
-                    3. **FLOW:** Insert [p] every 2-3 sentences.
-                    4. **NO SUMMARIZATION:** Match the full length of the original content.
-                    5. **CORRECTION:** 'Fall' is 'ပြုတ်ကျ'.
-                    """
+            if st.button("✨ Refine: Recap Style", use_container_width=True):
+                with st.spinner("Refining..."):
+                    prompt = f"""Act as a professional Myanmar Movie Recap Narrator. Rewrite: "{st.session_state.final_script}"
+                    RULES: 1. Use ~250 words/min. 2. Add [p], [action], [sad]. 3. No Summarization."""
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
 
@@ -584,10 +514,14 @@ with t1:
 
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
 
-        # Rendering Options
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
+        # 🔥 NEW: Engine Selection
+        tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
+        if tts_engine == "Google Cloud TTS (Pro)" and not st.session_state.google_creds:
+            st.error("⚠️ Please upload 'service_account.json' in Settings Sidebar to use Google Cloud TTS.")
+
         c_fmt, c_spd = st.columns([1, 1.2]) 
         with c_fmt:
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
@@ -601,27 +535,16 @@ with t1:
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
         zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
-        
-        auto_freeze = None; manual_freeze = None
-        if "Video" in export_format:
-            with st.expander("❄️ Freeze Frame Settings (Sync Helper)"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.checkbox("Every 30s"): auto_freeze = 30
-                    if st.checkbox("Every 60s"): auto_freeze = 60
-                with c2:
-                    manual_freeze = st.text_input("Manual Command", placeholder="freeze 10,3")
 
-        # RENDER BUTTON LOGIC
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
         
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
             
-            # 1. Generate Audio
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", base_speed=audio_speed)
+                # 🔥 Pass Engine Choice
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", engine=tts_engine, base_speed=audio_speed)
                 st.session_state.processed_audio_path = "voice.mp3"
             except Exception as e:
                 st.error(f"Audio Error: {e}"); st.stop()
@@ -629,26 +552,22 @@ with t1:
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
             else:
-                # 2. Video Processing with Speed & Sync
-                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
+                p_bar.progress(50, text="🎞️ Processing Video...")
                 input_vid = "input.mp4"
-                
-                # Update Duration based on speed
-                raw_vid_dur = get_duration(input_vid)
-                vid_dur = raw_vid_dur / video_speed 
-                aud_dur = get_duration("voice.mp3")
-
-                p_bar.progress(80, text="🎬 Merging & Finalizing...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
+                # Check Duration
+                vid_dur = get_duration(input_vid) / video_speed
+                aud_dur = get_duration("voice.mp3")
+                
+                cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"]
+                # Loop video if audio is longer
                 if aud_dur > vid_dur:
                     cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"]
-                else:
-                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"]
-                
+
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 p_bar.progress(100, text="🎉 Video Complete!")
                 st.session_state.processed_video_path = "dubbed_final.mp4"
@@ -661,8 +580,7 @@ with t1:
         st.audio(st.session_state.processed_audio_path)
         with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
-    
-    # === TAB 2: AUTO CAPTION ===
+# === TAB 2: AUTO CAPTION ===
 with t2:
     st.subheader("📝 Auto Caption")
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
@@ -671,7 +589,6 @@ with t2:
         if st.button("Generate Captions", use_container_width=True):
             check_requirements(); font_path = download_font()
             p_bar = st.progress(0, text="Processing...")
-            p_bar.progress(30, text="🎤 Transcribing...")
             subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
