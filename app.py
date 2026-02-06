@@ -196,7 +196,7 @@ EMOTION_MAP = {
     "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},
     "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},
     "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},
-    "[action]": {"rate": "+30%", "pitch": "+0Hz"},
+    "[action]": {"rate": "+20%", "pitch": "+0Hz"},
     "[whisper]": {"rate": "-10%", "pitch": "-20Hz"},
 }
 
@@ -241,32 +241,65 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
 
 # 3. Main Audio Logic (Switchable)
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
+# 3. Main Audio Logic (Switchable) - UPDATED FOR GLITCH FIX
+def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
     
+    # Calculate Base Params
     base_r_int = int(base_settings['rate'].replace('%', ''))
     base_p_int = int(base_settings['pitch'].replace('Hz', ''))
     slider_adj = int((base_speed - 1.0) * 100)
     current_rate = base_r_int + slider_adj
     current_pitch = base_p_int
 
+    # Regex split to keep tags
     parts = re.split(r'(\[.*?\])', full_text)
     audio_segments = []
     chunk_idx = 0
 
     for part in parts:
         part = part.strip()
-        if not part: continue
+        
+        # 🔥 LOGIC 1: Filter Empty Spaces (Glitch Fix)
+        # စာမရှိရင်၊ Space ပဲရှိရင် လုံးဝ ကျော်မယ်
+        if not part: 
+            continue
 
-        if part.lower() in EMOTION_MAP:
-            emo = EMOTION_MAP[part.lower()]
+        part_lower = part.lower()
+
+        # 🔥 LOGIC 2: Handle [p] as Silence (Not Text)
+        if part_lower == "[p]":
+            chunk_filename = f"chunk_{chunk_idx}_silence.mp3"
+            # FFmpeg ကိုသုံးပြီး ၁ စက္ကန့်စာ အသံတိတ်ဖိုင် ထုတ်မယ်
+            cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(chunk_filename):
+                audio_segments.append(chunk_filename)
+                chunk_idx += 1
+            continue
+
+        # Handle Emotion Tags
+        if part_lower in EMOTION_MAP:
+            emo = EMOTION_MAP[part_lower]
             base_r = int(base_settings['rate'].replace('%', '')) + slider_adj
             base_p = int(base_settings['pitch'].replace('Hz', ''))
             current_rate = base_r + int(emo['rate'].replace('%', ''))
             current_pitch = base_p + int(emo['pitch'].replace('Hz', ''))
             continue
         
+        # 🔥 LOGIC 3: Skip Unknown Tags
+        # Tag ပုံစံ [...] ဖြစ်ပြီး EMOTION_MAP ထဲမရှိရင် စာလိုမဖတ်ဘဲ ကျော်မယ်
+        if part.startswith("[") and part.endswith("]"):
+            continue
+        
+        # Normal Text Processing
         chunk_filename = f"chunk_{chunk_idx}.mp3"
         processed_text = normalize_text_for_tts(part)
+        
+        # စာသားသန့်စင်ပြီးလို့ ဘာမှမကျန်ရင် (ဥပမာ သင်္ကေတသက်သက်) အသံမထုတ်ဘူး
+        if not processed_text.strip():
+            continue
         
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
@@ -276,12 +309,12 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         else:
             rate_str = f"{current_rate:+d}%"
             pitch_str = f"{current_pitch:+d}Hz"
-            success = generate_edge_chunk(part, lang, gender, rate_str, pitch_str, chunk_filename)
+            success = generate_edge_chunk(processed_text, lang, gender, rate_str, pitch_str, chunk_filename)
         
         if success:
             audio_segments.append(chunk_filename)
             chunk_idx += 1
-            time.sleep(0.2)
+            if engine == "Edge TTS": time.sleep(0.1) # Stability Delay
 
     if not audio_segments: return False, "No audio generated"
     
@@ -291,10 +324,13 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
             
     try:
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for seg in audio_segments: os.remove(seg)
-        os.remove(concat_list)
+        # Cleanup
+        for seg in audio_segments: 
+            if os.path.exists(seg): os.remove(seg)
+        if os.path.exists(concat_list): os.remove(concat_list)
         return True, "Success"
     except Exception as e: return False, str(e)
+
 
 # ---------------------------------------------------------
 # 🔢 TEXT NORMALIZATION
