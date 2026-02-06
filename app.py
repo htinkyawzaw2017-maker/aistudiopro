@@ -239,8 +239,7 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         print(f"Google TTS Error: {e}")
         return False
 
-# 3. Main Audio Logic (Switchable)
-def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
+
 # 3. Main Audio Logic (Switchable) - UPDATED FOR GLITCH FIX
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
