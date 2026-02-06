@@ -482,8 +482,9 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 Language Selector
-        source_lang = st.selectbox("Original Lang", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
+        # 🔥 UI FIX: Input နဲ့ Output ကို ခွဲခြားလိုက်ခြင်း
+        in_lang = st.selectbox("Input (Video Language)", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
+        out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
         with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
@@ -495,27 +496,23 @@ with t1:
             subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                # 1. Smart Language Detection
-                lang_code = "my" if source_lang == "Burmese" else "en"
-                if source_lang == "Japanese": lang_code = "ja"
-                if source_lang == "Chinese": lang_code = "zh"
-                if source_lang == "Thai": lang_code = "th"
+                # 1. Whisper အတွက် Language Code သတ်မှတ်ခြင်း
+                lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
+                lang_code = lang_map.get(in_lang, "en")
 
-                transcribe_options = {"language": lang_code}
-                raw = model.transcribe("temp.wav", **transcribe_options)['text']
+                # Transcribe လုပ်ခြင်း
+                raw = model.transcribe("temp.wav", language=lang_code)['text']
                 st.session_state.raw_transcript = raw
                 
                 p_bar.progress(60, text="🧠 AI Processing...")
                 
-                # 🔥 FIXED: Output Language Logic (Same as Source)
-                if source_lang == "Burmese":
-                    prompt = f"Act as a Burmese editor. Refine this text for clarity. Do not translate. Input: '{raw}'"
-                elif source_lang == "English":
-                    prompt = f"Act as an English editor. Refine this text for clarity. Do not translate to Burmese. Keep it in English. Input: '{raw}'"
+                # 🔥 LOGIC FIX: Input နဲ့ Output တူ/မတူ ကြည့်ပြီး Prompt ပြောင်းခြင်း
+                if in_lang == out_lang:
+                    # ဘာသာစကားတူရင် Refine ပဲလုပ်မယ်
+                    prompt = f"Act as a professional {out_lang} editor. Refine this text for clarity and flow. Do not translate. Input: '{raw}'"
                 else:
-                    # For others, keep original or translate? User said "based on selected". 
-                    # Assuming they want the script in that language.
-                    prompt = f"Refine this {source_lang} script. Do not translate. Input: '{raw}'"
+                    # ဘာသာစကားမတူရင် Translate လုပ်မယ်
+                    prompt = f"Translate the following {in_lang} text into {out_lang}. Ensure the tone is natural and suitable for a video script. Input: '{raw}'"
                 
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
@@ -531,17 +528,14 @@ with t1:
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # 🔥 Dynamic Refine Button
-            refine_label = f"✨ Refine: {source_lang} Recap Style"
+            # 🔥 Dynamic Refine Button (Output Language ပေါ်မူတည်ပြီး အလုပ်လုပ်မည်)
+            refine_label = f"✨ Refine: {out_lang} Recap Style"
             if st.button(refine_label, use_container_width=True):
                 with st.spinner("Refining..."):
-                    if source_lang == "English":
-                        prompt = f"""Act as a professional English Movie Narrator. Rewrite the text into an engaging Recap Script.
-                        RULES: 1. Keep it in English. 2. Add [p], [action], [sad]. 3. No Summarization. Input: "{st.session_state.final_script}" """
-                    else:
-                        # Default to Burmese logic for others or add more ifs
-                         prompt = f"""Act as a professional Myanmar Movie Recap Narrator. Rewrite: "{st.session_state.final_script}"
-                        RULES: 1. Use ~250 words/min. 2. Add [p], [action], [sad]. 3. No Summarization."""
+                    prompt = f"""Act as a professional {out_lang} Movie Recap Narrator. 
+                    Rewrite the input text into an engaging Recap Script in {out_lang}.
+                    RULES: 1. Use about 250 words per minute. 2. Add tags like [p], [action], [sad]. 3. Do not summarize.
+                    Input: "{st.session_state.final_script}" """
                     
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
@@ -568,7 +562,9 @@ with t1:
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: target_lang = st.selectbox("Output Lang", list(VOICE_MAP.keys()))
+        with c_v1: 
+            # Voice Language ကို Output Language နဲ့ တိုက်ရိုက်ချိတ်ဆက်လိုက်ခြင်း
+            target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
@@ -578,7 +574,6 @@ with t1:
         
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
-            
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
                 generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", engine=tts_engine, base_speed=audio_speed)
