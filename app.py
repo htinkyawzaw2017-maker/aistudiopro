@@ -17,13 +17,19 @@ import requests
 import textwrap
 import math
 import uuid
+import os
+from google.cloud import texttospeech
+from google.oauth2 import service_account
 
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
 
-# 🔥 NEW: Google Cloud Imports
-from google.cloud import texttospeech
-from google.oauth2 import service_account
+# 🔥 လူတစ်ယောက်ချင်းစီအတွက် ဖိုင်နာမည်များကို သီးသန့် သတ်မှတ်ခြင်း
+user_input_vid = f"input_{st.session_state.session_id}.mp4"
+user_temp_wav = f"temp_{st.session_state.session_id}.wav"
+user_voice_mp3 = f"voice_{st.session_state.session_id}.mp3"
+user_final_vid = f"final_{st.session_state.session_id}.mp4"
+
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP (NEON SPACE THEME)
@@ -192,7 +198,7 @@ GOOGLE_VOICE_MAP = {
 VOICE_MODES = {
     "Normal": {"rate": "+0%", "pitch": "+0Hz"},
     "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
-    "Recap": {"rate": "+5%", "pitch": "+0Hz"},
+    "Recap": {"rate": "+10", "pitch": "+4Hz"},
     "Motivation": {"rate": "+10", "pitch": "+2Hz"},
 }
 EMOTION_MAP = {
@@ -200,8 +206,8 @@ EMOTION_MAP = {
     "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},
     "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},
     "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},
-    "[action]": {"rate": "+20%", "pitch": "+0Hz"},
-    "[whisper]": {"rate": "-10%", "pitch": "-20Hz"},
+    "[action]": {"rate": "+13%", "pitch": "+0Hz"},
+    "[whisper]": {"rate": "-5%", "pitch": "-20Hz"},
 }
 
 # 1. Edge TTS Generator (With Retry)
@@ -491,37 +497,33 @@ with t1:
         out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
-        with open("input.mp4", "wb") as f: f.write(uploaded.getbuffer())
+        # Unique input name သုံး၍ ဖိုင်သိမ်းခြင်း
+        with open(user_input_vid, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("📝 Extract & Process", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
             p_bar.progress(20, text="🎤 Transcribing Audio...")
-            subprocess.run(['ffmpeg', '-y', '-i', "input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'temp.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Unique names သုံး၍ FFmpeg ခိုင်းခြင်း
+            subprocess.run(['ffmpeg', '-y', '-i', user_input_vid, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', user_temp_wav], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                # 1. Whisper အတွက် Language Code သတ်မှတ်ခြင်း
                 lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
                 lang_code = lang_map.get(in_lang, "en")
 
-                # Transcribe လုပ်ခြင်း
-                raw = model.transcribe("temp.wav", language=lang_code)['text']
+                raw = model.transcribe(user_temp_wav, language=lang_code)['text']
                 st.session_state.raw_transcript = raw
                 
                 p_bar.progress(60, text="🧠 AI Processing...")
-                
-                # 🔥 LOGIC FIX: Input နဲ့ Output တူ/မတူ ကြည့်ပြီး Prompt ပြောင်းခြင်း
                 if in_lang == out_lang:
-                    # ဘာသာစကားတူရင် Refine ပဲလုပ်မယ်
-                    prompt = f"Act as a professional {out_lang} editor. Refine this text for clarity and flow. Do not translate. Input: '{raw}'"
+                    prompt = f"Refine this {out_lang} text. Input: '{raw}'"
                 else:
-                    # ဘာသာစကားမတူရင် Translate လုပ်မယ်
-                    prompt = f"Translate the following {in_lang} text into {out_lang}. Ensure the tone is natural and suitable for a video script. Input: '{raw}'"
+                    prompt = f"Translate to {out_lang}. Input: '{raw}'"
                 
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
-        
+
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
@@ -551,24 +553,21 @@ with t1:
 
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
 
+        # 🔥 UI FIX: Slider များကို Script ပေါ်သည်နှင့် တစ်ခါတည်း မြင်ရအောင် နေရာရွှေ့ခြင်း
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
-        tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
-        if tts_engine == "Google Cloud TTS (Pro)" and not st.session_state.google_creds:
-            st.error("⚠️ Please upload 'service_account.json' in Settings Sidebar to use Google Cloud TTS.")
-
+        # Slider များ၏ Indentation ကို သေချာညှိထား၍ အမြဲပေါ်စေသည်
         c_fmt, c_spd = st.columns([1, 1.2]) 
         with c_fmt:
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
+            tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
         with c_spd:
             audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: 
-            # Voice Language ကို Output Language နဲ့ တိုက်ရိုက်ချိတ်ဆက်လိုက်ခြင်း
-            target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
+        with c_v1: target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
@@ -580,58 +579,54 @@ with t1:
             p_bar = st.progress(0, text="🚀 Initializing...")
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, "voice.mp3", engine=tts_engine, base_speed=audio_speed)
-                st.session_state.processed_audio_path = "voice.mp3"
+                # Unique voice file name ကို သုံးခြင်း
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, user_voice_mp3, engine=tts_engine, base_speed=audio_speed)
+                st.session_state.processed_audio_path = user_voice_mp3
             except Exception as e:
                 st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
             else:
-                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
-                input_vid = "input.mp4"
-                raw_vid_dur = get_duration(input_vid)
+                p_bar.progress(50, text="🎞️ Rendering Video...")
+                raw_vid_dur = get_duration(user_input_vid)
                 vid_dur = raw_vid_dur / video_speed 
-                aud_dur = get_duration("voice.mp3")
+                aud_dur = get_duration(user_voice_mp3)
 
-                # 🔥 Unique Filename သတ်မှတ်ခြင်း
-                out_vid = f"final_{st.session_state.session_id}.mp4"
-
-                p_bar.progress(80, text="🎬 Merging & Finalizing...")
+                p_bar.progress(80, text="🎬 Final Merging...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
+                # 🔥 SMART SYNC: Unique names ကိုသာ အစအဆုံး သုံးထားသည်
                 if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', out_vid]
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', user_input_vid, '-i', user_voice_mp3, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', user_final_vid]
                 else:
-                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', out_vid]
+                    cmd = ['ffmpeg', '-y', '-i', user_input_vid, '-i', user_voice_mp3, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', user_final_vid]
                 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # 🔥 ဖိုင်တကယ်ထွက်မထွက် စစ်ဆေးခြင်း
-                if os.path.exists(out_vid):
+                if os.path.exists(user_final_vid):
                     p_bar.progress(100, text="🎉 Video Complete!")
-                    st.session_state.processed_video_path = out_vid
+                    st.session_state.processed_video_path = user_final_vid
                 else:
                     st.error("❌ Rendering Fail: ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။")
 
-
-
+    # Results Display
     if st.session_state.processed_video_path and "Video" in export_format:
-        # 🔥 ဖိုင်တကယ်ရှိမရှိ အရင်စစ်မယ်
         if os.path.exists(st.session_state.processed_video_path):
-            try:
-                st.video(st.session_state.processed_video_path)
-            except Exception as e:
-                st.error("ဗီဒီယိုကို ပြသလို့မရပါဘူး။ ဖိုင်ဆိုဒ် အရမ်းကြီးနေတာ ဖြစ်နိုင်ပါတယ်။")
+            st.video(st.session_state.processed_video_path)
+            with open(st.session_state.processed_video_path, "rb") as f:
+                st.download_button("🎬 Download Video", f, "final_recap.mp4", use_container_width=True)
         else:
-            st.error("❌ ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။ Rendering လုပ်တာ တစ်ခုခု မှားယွင်းသွားပါတယ်။")
+            st.error("❌ ဗီဒီယိုဖိုင်ကို ရှာမတွေ့ပါ။ တစ်ခါပြန် Render လုပ်ပေးပါ။")
 
     if st.session_state.processed_audio_path:
-        st.audio(st.session_state.processed_audio_path)
-        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
+        if os.path.exists(st.session_state.processed_audio_path):
+            st.audio(st.session_state.processed_audio_path)
+            with open(st.session_state.processed_audio_path, "rb") as f:
+                st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
