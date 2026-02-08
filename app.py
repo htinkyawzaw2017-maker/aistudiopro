@@ -21,30 +21,36 @@ from google.cloud import texttospeech
 from google.oauth2 import service_account
 
 # ---------------------------------------------------------
-# 🆔 SESSION ID MANAGEMENT (FILE SAFETY)
+# 🛡️ SYSTEM SETUP & FOLDER ISOLATION
 # ---------------------------------------------------------
 if 'session_id' not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())[:8]
+    st.session_state.session_id = str(uuid.uuid4())
 
-# 📂 Unique Filenames per User
-SID = st.session_state.session_id
-FILE_INPUT = f"input_{SID}.mp4"
-FILE_TEMP_WAV = f"temp_{SID}.wav"
-FILE_VOICE = f"voice_{SID}.mp3"
-FILE_FINAL = f"final_{SID}.mp4"
-FILE_CAP_INPUT = f"cap_input_{SID}.mp4"
-FILE_CAP_WAV = f"cap_{SID}.wav"
-FILE_CAP_FINAL = f"captioned_{SID}.mp4"
-FILE_ASS = f"captions_{SID}.ass"
+# 🔥 CRITICAL: Create Unique Folder for EACH User
+# User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့် စနစ်
+BASE_DIR = "user_sessions"
+USER_DIR = os.path.join(BASE_DIR, st.session_state.session_id)
+os.makedirs(USER_DIR, exist_ok=True)
+
+# Define File Paths INSIDE the User's Folder
+# ဖိုင်အားလုံးကို အဲ့ဒီ Folder ထဲမှာပဲ သိမ်းမည် (လုံးဝမရောတော့ပါ)
+FILE_INPUT = os.path.join(USER_DIR, "input_video.mp4")
+FILE_TEMP_WAV = os.path.join(USER_DIR, "temp_audio.wav")
+FILE_VOICE = os.path.join(USER_DIR, "generated_voice.mp3")
+FILE_FINAL = os.path.join(USER_DIR, "final_output.mp4")
+
+FILE_CAP_INPUT = os.path.join(USER_DIR, "caption_input.mp4")
+FILE_CAP_WAV = os.path.join(USER_DIR, "caption_audio.wav")
+FILE_CAP_FINAL = os.path.join(USER_DIR, "captioned_output.mp4")
+FILE_ASS = os.path.join(USER_DIR, "subtitles.ass")
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP (NEON SPACE THEME)
+# 🎨 UI SETUP
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
-    /* 1. Global Background */
     .stApp {
         background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
         background-attachment: fixed;
@@ -52,27 +58,19 @@ st.markdown("""
         background-position: center;
         color: #e0e0e0;
     }
-
-    /* 2. Sidebar & Header Styling */
     [data-testid="stSidebar"] {
         background-color: rgba(10, 25, 47, 0.95);
         border-right: 1px solid #00d2ff;
     }
-    
-    /* Show Header but make transparent, Style the Toggle Button */
     header[data-testid="stHeader"] {
         background-color: transparent;
     }
-    
-    /* The Sidebar Toggle Arrow - Make it NEON BLUE */
     button[kind="header"] {
         color: #00C9FF !important;
         background-color: rgba(0,0,0,0.5) !important;
         border: 1px solid #00C9FF !important;
         box-shadow: 0 0 10px #00C9FF;
     }
-
-    /* 3. Custom Title */
     .main-header {
         font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
@@ -85,45 +83,22 @@ st.markdown("""
         margin-bottom: 20px;
         margin-top: -50px;
     }
-
-    /* 4. Input Elements */
-    div[data-testid="stFileUploader"] {
+    div[data-testid="stFileUploader"], div[class="stTextArea"] {
         background-color: rgba(10, 25, 47, 0.9);
         border: 1px solid #00d2ff;
         border-radius: 10px;
-        padding: 10px;
     }
-    div[data-testid="stExpander"], div[class="stTextArea"] {
-        background-color: rgba(10, 25, 47, 0.85);
-        border: 1px solid #00d2ff;
-        border-radius: 15px;
-    }
-    
-    /* 5. Buttons */
     .stButton > button {
         background: linear-gradient(45deg, #ff00cc, #3333ff);
         color: white;
         border: none;
         border-radius: 8px;
-        padding: 10px 24px;
         font-weight: bold;
-        transition: all 0.3s ease;
-        box-shadow: 0 0 10px rgba(255, 0, 204, 0.4);
-    }
-    .stButton > button:hover {
-        transform: scale(1.05);
-        box-shadow: 0 0 20px rgba(255, 0, 204, 0.7);
-    }
-    
-    /* 6. Responsive Text for Mobile */
-    @media only screen and (max-width: 600px) {
-        .main-header { font-size: 1.8rem; margin-top: 0px; }
     }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
-# Custom Header Display
 st.markdown("""
 <div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
     <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="60"/>
@@ -145,7 +120,6 @@ if 'google_creds' not in st.session_state: st.session_state.google_creds = None
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
-
 def load_custom_dictionary():
     dict_file = "dictionary.txt"
     if os.path.exists(dict_file):
@@ -191,7 +165,7 @@ def load_whisper_safe():
     except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
 # ---------------------------------------------------------
-# 🔊 DUAL AUDIO ENGINE (EDGE & GOOGLE)
+# 🔊 AUDIO ENGINE (Path Aware)
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
@@ -216,7 +190,6 @@ EMOTION_MAP = {
     "[whisper]": {"rate": "-10%", "pitch": "-20Hz"},
 }
 
-# 1. Edge TTS Generator
 def generate_edge_chunk(text, lang, gender, rate_str, pitch_str, output_file):
     voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
     cmd = ["edge-tts", "--voice", voice_id, "--text", text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
@@ -227,72 +200,48 @@ def generate_edge_chunk(text, lang, gender, rate_str, pitch_str, output_file):
         except: time.sleep(1); continue
     return False
 
-# 2. Google Cloud TTS Generator
 def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, creds):
     try:
         client = texttospeech.TextToSpeechClient(credentials=creds)
         s_input = texttospeech.SynthesisInput(text=text)
-        
         g_voice_name = GOOGLE_VOICE_MAP.get(lang, {}).get(gender, "en-US-Neural2-F")
         lang_code = "my-MM" if lang == "Burmese" else "en-US"
-        
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=lang_code,
-            name=g_voice_name
-        )
-        
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=rate_val,
-            pitch=pitch_val
-        )
-
+        voice = texttospeech.VoiceSelectionParams(language_code=lang_code, name=g_voice_name)
+        audio_config = texttospeech.AudioConfig(audio_encoding=texttospeech.AudioEncoding.MP3, speaking_rate=rate_val, pitch=pitch_val)
         response = client.synthesize_speech(input=s_input, voice=voice, audio_config=audio_config)
-        with open(output_file, "wb") as out:
-            out.write(response.audio_content)
+        with open(output_file, "wb") as out: out.write(response.audio_content)
         return True
-    except Exception as e:
-        print(f"Google TTS Error: {e}")
-        return False
+    except Exception as e: print(f"Google TTS Error: {e}"); return False
 
-# 3. Main Audio Logic (UPDATED: GLITCH FIX & SILENT [p])
-def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
+# 🔥 UPDATED FUNCTION: Takes 'user_folder' as argument to keep files separate
+def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, user_folder, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
-    
-    # Calculate Base Params
     base_r_int = int(base_settings['rate'].replace('%', ''))
     base_p_int = int(base_settings['pitch'].replace('Hz', ''))
     slider_adj = int((base_speed - 1.0) * 100)
     current_rate = base_r_int + slider_adj
     current_pitch = base_p_int
 
-    # Regex split to keep tags
     parts = re.split(r'(\[.*?\])', full_text)
     audio_segments = []
     chunk_idx = 0
 
     for part in parts:
         part = part.strip()
-        
-        # 🔥 LOGIC 1: Filter Empty Spaces (Glitch Fix)
-        if not part: 
-            continue
-
+        if not part: continue
         part_lower = part.lower()
 
-        # 🔥 LOGIC 2: Handle [p] as Silence (Not Text)
+        # Handle [p]
         if part_lower == "[p]":
-            chunk_filename = f"chunk_{SID}_{chunk_idx}_silence.mp3"
-            # FFmpeg: 1 second silence
+            # 🔥 Save chunks INSIDE user_folder
+            chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
             if os.path.exists(chunk_filename):
                 audio_segments.append(chunk_filename)
                 chunk_idx += 1
             continue
 
-        # Handle Emotion Tags
         if part_lower in EMOTION_MAP:
             emo = EMOTION_MAP[part_lower]
             base_r = int(base_settings['rate'].replace('%', '')) + slider_adj
@@ -301,16 +250,13 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
             current_pitch = base_p + int(emo['pitch'].replace('Hz', ''))
             continue
         
-        # 🔥 LOGIC 3: Skip Unknown Tags
-        if part.startswith("[") and part.endswith("]"):
-            continue
+        if part.startswith("[") and part.endswith("]"): continue
         
-        # Normal Text Processing
-        chunk_filename = f"chunk_{SID}_{chunk_idx}.mp3"
         processed_text = normalize_text_for_tts(part)
+        if not processed_text.strip(): continue
         
-        if not processed_text.strip():
-            continue
+        # 🔥 Save chunks INSIDE user_folder
+        chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}.mp3")
         
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
@@ -329,16 +275,16 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
     if not audio_segments: return False, "No audio generated"
     
-    concat_list = f"audio_concat_{SID}.txt"
+    # 🔥 Concat list INSIDE user_folder
+    concat_list = os.path.join(user_folder, "concat_list.txt")
     with open(concat_list, "w") as f:
-        for seg in audio_segments: f.write(f"file '{seg}'\n")
+        for seg in audio_segments: 
+            # FFmpeg needs safe paths
+            safe_seg = seg.replace("\\", "/")
+            f.write(f"file '{safe_seg}'\n")
             
     try:
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Cleanup
-        for seg in audio_segments: 
-            if os.path.exists(seg): os.remove(seg)
-        if os.path.exists(concat_list): os.remove(concat_list)
         return True, "Success"
     except Exception as e: return False, str(e)
 
@@ -350,10 +296,8 @@ def num_to_burmese_spoken(num_str):
         if "." in num_str:
             parts = num_str.split(".")
             if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                left = num_to_burmese_spoken(parts[0])
-                right = num_to_burmese_spoken(parts[1]) 
+                left = num_to_burmese_spoken(parts[0]); right = num_to_burmese_spoken(parts[1]) 
                 return f"{left} ဒသမ {right}"
-
         num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
@@ -405,8 +349,7 @@ def generate_with_retry(prompt):
     keys = st.session_state.api_keys
     model_name = st.session_state.get("selected_model", "gemini-1.5-flash")
     custom_rules = load_custom_dictionary()
-    if custom_rules:
-        prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
+    if custom_rules: prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
     for i, key in enumerate(keys):
         try:
             model = get_model(key, model_name)
@@ -418,8 +361,7 @@ def generate_with_retry(prompt):
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE
 # ---------------------------------------------------------
-def generate_ass_file(segments, font_path):
-    filename = FILE_ASS
+def generate_ass_file(segments, font_path, output_path):
     def seconds_to_ass(seconds):
         h = int(seconds // 3600); m = int((seconds % 3600) // 60); s = int(seconds % 60); cs = int((seconds % 1) * 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
@@ -434,7 +376,7 @@ Style: CapCut,Padauk-Bold,24,&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(header)
         for seg in segments:
             start = seconds_to_ass(seg['start'])
@@ -443,7 +385,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             wrapped_lines = textwrap.wrap(raw_text, width=40)
             final_text = "\\N".join(wrapped_lines) 
             f.write(f"Dialogue: 0,{start},{end},CapCut,,0,0,0,,{final_text}\n")
-    return filename
+    return output_path
 
 # ---------------------------------------------------------
 # 🖥️ MAIN UI & SIDEBAR
@@ -451,7 +393,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 with st.sidebar:
     st.header("⚙️ Control Panel")
     
-    # Cloud TTS Uploader
     st.markdown("☁️ **Google Cloud TTS (Optional):**")
     gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Upload your GCP Key here to unlock Pro voices.")
     if gcp_file:
@@ -472,12 +413,17 @@ with st.sidebar:
         api_key_input = st.text_input("Gemini API Keys", value=default_keys, type="password")
         if api_key_input:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        
         st.session_state.selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"], index=0)
 
-    with st.expander("📚 Knowledge & Pronunciation", expanded=False):
-        st.info("📂 System is using internal files.")
-        if st.button("🔄 Reload Files"): st.rerun()
+    # 🔥 NEW: Danger Zone to clear user data manually
+    with st.expander("🚨 Danger Zone", expanded=False):
+        if st.button("🗑️ Clear My Data"):
+            try:
+                shutil.rmtree(USER_DIR)
+                os.makedirs(USER_DIR, exist_ok=True)
+                st.success("Data cleared!")
+                st.rerun()
+            except Exception as e: st.error(str(e))
 
     if st.button("🔴 Reset System", use_container_width=True):
         for key in st.session_state.keys(): del st.session_state[key]
@@ -493,11 +439,11 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 Input / Output Logic
         in_lang = st.selectbox("Input (Video Language)", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
         out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
+        # 🔥 Write to ISOLATED folder
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("📝 Extract & Process", use_container_width=True):
@@ -507,16 +453,12 @@ with t1:
             subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_TEMP_WAV], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                # 1. Whisper Language Logic
                 lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
                 lang_code = lang_map.get(in_lang, "en")
-
                 raw = model.transcribe(FILE_TEMP_WAV, language=lang_code)['text']
                 st.session_state.raw_transcript = raw
-                
                 p_bar.progress(60, text="🧠 AI Processing...")
                 
-                # 🔥 AI Logic: Translate or Refine
                 if in_lang == out_lang:
                     prompt = f"Act as a professional {out_lang} editor. Refine this text for clarity. Do not translate. Input: '{raw}'"
                 else:
@@ -531,19 +473,12 @@ with t1:
         est_min = round(word_count / 250, 1)
         st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
         
-        if st.session_state.final_script:
-            st.markdown("### 🎬 Script & Production")
-        
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
             refine_label = f"✨ Refine: {out_lang} Recap Style"
             if st.button(refine_label, use_container_width=True):
                 with st.spinner("Refining..."):
-                    prompt = f"""Act as a professional {out_lang} Movie Recap Narrator. 
-                    Rewrite the input text into an engaging Recap Script in {out_lang}.
-                    RULES: 1. Use about 250 words per minute. 2. Add tags like [p], [action], [sad]. 3. Do not summarize.
-                    Input: "{st.session_state.final_script}" """
-                    
+                    prompt = f"""Act as a professional {out_lang} Movie Recap Narrator. Rewrite input into Recap Script. RULES: 1. Use ~250 wpm. 2. Add [p], [action], [sad]. 3. No Summarization. Input: "{st.session_state.final_script}" """
                     st.session_state.final_script = generate_with_retry(prompt)
                     st.rerun()
 
@@ -569,8 +504,7 @@ with t1:
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: 
-            target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
+        with c_v1: target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
@@ -582,10 +516,10 @@ with t1:
             p_bar = st.progress(0, text="🚀 Initializing...")
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
+                # 🔥 Pass USER_DIR to function
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, USER_DIR, engine=tts_engine, base_speed=audio_speed)
                 st.session_state.processed_audio_path = FILE_VOICE
-            except Exception as e:
-                st.error(f"Audio Error: {e}"); st.stop()
+            except Exception as e: st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
@@ -595,7 +529,6 @@ with t1:
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
-                
                 vid_dur = get_duration(FILE_INPUT) / video_speed
                 aud_dur = get_duration(FILE_VOICE)
                 
@@ -629,18 +562,18 @@ with t2:
             if model:
                 segments = model.transcribe(FILE_CAP_WAV, task="transcribe")['segments']
                 trans_segments = []
-                total_seg = len(segments)
                 for i, seg in enumerate(segments):
-                    p_bar.progress(30 + int((i/total_seg)*50), text=f"🧠 Translating {i+1}/{total_seg}")
+                    p_bar.progress(int((i/len(segments))*50), text=f"🧠 Translating...")
                     txt = seg['text'].strip()
                     if txt:
                         burmese = generate_with_retry(f"Translate to Burmese. Short. Input: '{txt}'")
                         trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
                         time.sleep(0.3)
                 p_bar.progress(90, text="✍️ Burning Subtitles...")
-                ass_file = generate_ass_file(trans_segments, font_path)
+                # 🔥 Pass FILE_ASS to function
+                generate_ass_file(trans_segments, font_path, FILE_ASS)
                 font_dir = os.path.dirname(font_path)
-                subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={FILE_ASS}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 st.session_state.caption_video_path = FILE_CAP_FINAL
                 p_bar.progress(100, text="Done!")
 
