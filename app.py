@@ -17,19 +17,25 @@ import requests
 import textwrap
 import math
 import uuid
-import os
 from google.cloud import texttospeech
 from google.oauth2 import service_account
 
+# ---------------------------------------------------------
+# 🆔 SESSION ID MANAGEMENT (FILE SAFETY)
+# ---------------------------------------------------------
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())[:8]
 
-# 🔥 လူတစ်ယောက်ချင်းစီအတွက် ဖိုင်နာမည်များကို သီးသန့် သတ်မှတ်ခြင်း
-user_input_vid = f"input_{st.session_state.session_id}.mp4"
-user_temp_wav = f"temp_{st.session_state.session_id}.wav"
-user_voice_mp3 = f"voice_{st.session_state.session_id}.mp3"
-user_final_vid = f"final_{st.session_state.session_id}.mp4"
-
+# 📂 Unique Filenames per User
+SID = st.session_state.session_id
+FILE_INPUT = f"input_{SID}.mp4"
+FILE_TEMP_WAV = f"temp_{SID}.wav"
+FILE_VOICE = f"voice_{SID}.mp3"
+FILE_FINAL = f"final_{SID}.mp4"
+FILE_CAP_INPUT = f"cap_input_{SID}.mp4"
+FILE_CAP_WAV = f"cap_{SID}.wav"
+FILE_CAP_FINAL = f"captioned_{SID}.mp4"
+FILE_ASS = f"captions_{SID}.ass"
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP (NEON SPACE THEME)
@@ -38,6 +44,7 @@ st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout=
 
 st.markdown("""
     <style>
+    /* 1. Global Background */
     .stApp {
         background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
         background-attachment: fixed;
@@ -45,19 +52,41 @@ st.markdown("""
         background-position: center;
         color: #e0e0e0;
     }
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
+
+    /* 2. Sidebar & Header Styling */
+    [data-testid="stSidebar"] {
+        background-color: rgba(10, 25, 47, 0.95);
+        border-right: 1px solid #00d2ff;
+    }
+    
+    /* Show Header but make transparent, Style the Toggle Button */
+    header[data-testid="stHeader"] {
+        background-color: transparent;
+    }
+    
+    /* The Sidebar Toggle Arrow - Make it NEON BLUE */
+    button[kind="header"] {
+        color: #00C9FF !important;
+        background-color: rgba(0,0,0,0.5) !important;
+        border: 1px solid #00C9FF !important;
+        box-shadow: 0 0 10px #00C9FF;
+    }
+
+    /* 3. Custom Title */
     .main-header {
         font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         text-align: center;
-        font-size: 3.5rem;
+        font-size: 3rem;
         font-weight: 800;
         text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
         margin-bottom: 20px;
+        margin-top: -50px;
     }
+
+    /* 4. Input Elements */
     div[data-testid="stFileUploader"] {
         background-color: rgba(10, 25, 47, 0.9);
         border: 1px solid #00d2ff;
@@ -68,10 +97,9 @@ st.markdown("""
         background-color: rgba(10, 25, 47, 0.85);
         border: 1px solid #00d2ff;
         border-radius: 15px;
-        padding: 15px;
-        box-shadow: 0 0 15px rgba(0, 210, 255, 0.2);
-        backdrop-filter: blur(5px);
     }
+    
+    /* 5. Buttons */
     .stButton > button {
         background: linear-gradient(45deg, #ff00cc, #3333ff);
         color: white;
@@ -80,48 +108,26 @@ st.markdown("""
         padding: 10px 24px;
         font-weight: bold;
         transition: all 0.3s ease;
-        box-shadow: 0 0 20px rgba(255, 0, 204, 0.4);
+        box-shadow: 0 0 10px rgba(255, 0, 204, 0.4);
     }
     .stButton > button:hover {
         transform: scale(1.05);
-        box-shadow: 0 0 30px rgba(255, 0, 204, 0.7);
+        box-shadow: 0 0 20px rgba(255, 0, 204, 0.7);
     }
-    input, textarea, select, div[data-baseweb="select"] > div {
-        background-color: rgba(10, 25, 47, 0.9) !important;
-        color: #ffffff !important;
-        border: 1px solid #00d2ff !important;
-        border-radius: 8px !important;
-    }
-    div[role="listbox"] ul {
-        background-color: #050b14 !important;
-        color: white !important;
-    }
-    p, label {
-        color: #e0e0e0 !important;
-    }
-    div[data-baseweb="tab-list"] {
-        background-color: rgba(0,0,0,0.5);
-        border-radius: 15px;
-        padding: 5px;
-        border: 1px solid #333;
-    }
-    div[data-baseweb="tab"] {
-        color: #888;
-        font-weight: bold;
-    }
-    div[data-baseweb="tab"][aria-selected="true"] {
-        background: linear-gradient(90deg, #ff4b1f, #ff9068);
-        color: white !important;
-        border-radius: 10px;
+    
+    /* 6. Responsive Text for Mobile */
+    @media only screen and (max-width: 600px) {
+        .main-header { font-size: 1.8rem; margin-top: 0px; }
     }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
+# Custom Header Display
 st.markdown("""
-<div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
-    <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="80"/>
-    <div class="main-header"></div>
+<div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
+    <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="60"/>
+    <div class="main-header">MYANMAR AI STUDIO PRO</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -198,7 +204,7 @@ GOOGLE_VOICE_MAP = {
 VOICE_MODES = {
     "Normal": {"rate": "+0%", "pitch": "+0Hz"},
     "Story": {"rate": "-5%", "pitch": "-2Hz"}, 
-    "Recap": {"rate": "+10", "pitch": "+4Hz"},
+    "Recap": {"rate": "+5%", "pitch": "+0Hz"},
     "Motivation": {"rate": "+10", "pitch": "+2Hz"},
 }
 EMOTION_MAP = {
@@ -206,11 +212,11 @@ EMOTION_MAP = {
     "[sad]":    {"rate": "-15%", "pitch": "-15Hz"},
     "[angry]":  {"rate": "+15%", "pitch": "+5Hz"},
     "[happy]":  {"rate": "+10%", "pitch": "+15Hz"},
-    "[action]": {"rate": "+13%", "pitch": "+0Hz"},
-    "[whisper]": {"rate": "-5%", "pitch": "-20Hz"},
+    "[action]": {"rate": "+30%", "pitch": "+0Hz"},
+    "[whisper]": {"rate": "-10%", "pitch": "-20Hz"},
 }
 
-# 1. Edge TTS Generator (With Retry)
+# 1. Edge TTS Generator
 def generate_edge_chunk(text, lang, gender, rate_str, pitch_str, output_file):
     voice_id = VOICE_MAP.get(lang, {}).get(gender, "en-US-AriaNeural")
     cmd = ["edge-tts", "--voice", voice_id, "--text", text, f"--rate={rate_str}", f"--pitch={pitch_str}", "--write-media", output_file]
@@ -249,8 +255,7 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         print(f"Google TTS Error: {e}")
         return False
 
-
-# 3. Main Audio Logic (Switchable) - UPDATED FOR GLITCH FIX
+# 3. Main Audio Logic (UPDATED: GLITCH FIX & SILENT [p])
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
     
@@ -270,7 +275,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         part = part.strip()
         
         # 🔥 LOGIC 1: Filter Empty Spaces (Glitch Fix)
-        # စာမရှိရင်၊ Space ပဲရှိရင် လုံးဝ ကျော်မယ်
         if not part: 
             continue
 
@@ -278,8 +282,8 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
         # 🔥 LOGIC 2: Handle [p] as Silence (Not Text)
         if part_lower == "[p]":
-            chunk_filename = f"chunk_{chunk_idx}_silence.mp3"
-            # FFmpeg ကိုသုံးပြီး ၁ စက္ကန့်စာ အသံတိတ်ဖိုင် ထုတ်မယ်
+            chunk_filename = f"chunk_{SID}_{chunk_idx}_silence.mp3"
+            # FFmpeg: 1 second silence
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
@@ -298,15 +302,13 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
             continue
         
         # 🔥 LOGIC 3: Skip Unknown Tags
-        # Tag ပုံစံ [...] ဖြစ်ပြီး EMOTION_MAP ထဲမရှိရင် စာလိုမဖတ်ဘဲ ကျော်မယ်
         if part.startswith("[") and part.endswith("]"):
             continue
         
         # Normal Text Processing
-        chunk_filename = f"chunk_{chunk_idx}.mp3"
+        chunk_filename = f"chunk_{SID}_{chunk_idx}.mp3"
         processed_text = normalize_text_for_tts(part)
         
-        # စာသားသန့်စင်ပြီးလို့ ဘာမှမကျန်ရင် (ဥပမာ သင်္ကေတသက်သက်) အသံမထုတ်ဘူး
         if not processed_text.strip():
             continue
         
@@ -323,11 +325,11 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if success:
             audio_segments.append(chunk_filename)
             chunk_idx += 1
-            if engine == "Edge TTS": time.sleep(0.1) # Stability Delay
+            if engine == "Edge TTS": time.sleep(0.1)
 
     if not audio_segments: return False, "No audio generated"
     
-    concat_list = "audio_concat.txt"
+    concat_list = f"audio_concat_{SID}.txt"
     with open(concat_list, "w") as f:
         for seg in audio_segments: f.write(f"file '{seg}'\n")
             
@@ -339,7 +341,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if os.path.exists(concat_list): os.remove(concat_list)
         return True, "Success"
     except Exception as e: return False, str(e)
-
 
 # ---------------------------------------------------------
 # 🔢 TEXT NORMALIZATION
@@ -418,7 +419,7 @@ def generate_with_retry(prompt):
 # 📝 .ASS SUBTITLE
 # ---------------------------------------------------------
 def generate_ass_file(segments, font_path):
-    filename = "captions.ass"
+    filename = FILE_ASS
     def seconds_to_ass(seconds):
         h = int(seconds // 3600); m = int((seconds % 3600) // 60); s = int(seconds % 60); cs = int((seconds % 1) * 100)
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
@@ -450,7 +451,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 with st.sidebar:
     st.header("⚙️ Control Panel")
     
-    # 🔥 FIXED: Moved JSON Uploader to TOP for visibility
+    # Cloud TTS Uploader
     st.markdown("☁️ **Google Cloud TTS (Optional):**")
     gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Upload your GCP Key here to unlock Pro voices.")
     if gcp_file:
@@ -492,38 +493,39 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 UI FIX: Input နဲ့ Output ကို ခွဲခြားလိုက်ခြင်း
+        # 🔥 Input / Output Logic
         in_lang = st.selectbox("Input (Video Language)", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
         out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
-        # Unique input name သုံး၍ ဖိုင်သိမ်းခြင်း
-        with open(user_input_vid, "wb") as f: f.write(uploaded.getbuffer())
+        with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("📝 Extract & Process", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
             p_bar.progress(20, text="🎤 Transcribing Audio...")
-            # Unique names သုံး၍ FFmpeg ခိုင်းခြင်း
-            subprocess.run(['ffmpeg', '-y', '-i', user_input_vid, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', user_temp_wav], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_TEMP_WAV], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
+                # 1. Whisper Language Logic
                 lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
                 lang_code = lang_map.get(in_lang, "en")
 
-                raw = model.transcribe(user_temp_wav, language=lang_code)['text']
+                raw = model.transcribe(FILE_TEMP_WAV, language=lang_code)['text']
                 st.session_state.raw_transcript = raw
                 
                 p_bar.progress(60, text="🧠 AI Processing...")
+                
+                # 🔥 AI Logic: Translate or Refine
                 if in_lang == out_lang:
-                    prompt = f"Refine this {out_lang} text. Input: '{raw}'"
+                    prompt = f"Act as a professional {out_lang} editor. Refine this text for clarity. Do not translate. Input: '{raw}'"
                 else:
-                    prompt = f"Translate to {out_lang}. Input: '{raw}'"
+                    prompt = f"Translate the following {in_lang} text into {out_lang}. Ensure the tone is natural. Input: '{raw}'"
                 
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
-
+        
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
         est_min = round(word_count / 250, 1)
@@ -534,7 +536,6 @@ with t1:
         
         c_opt1, c_opt2 = st.columns(2)
         with c_opt1:
-            # 🔥 Dynamic Refine Button (Output Language ပေါ်မူတည်ပြီး အလုပ်လုပ်မည်)
             refine_label = f"✨ Refine: {out_lang} Recap Style"
             if st.button(refine_label, use_container_width=True):
                 with st.spinner("Refining..."):
@@ -553,21 +554,23 @@ with t1:
 
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
 
-        # 🔥 UI FIX: Slider များကို Script ပေါ်သည်နှင့် တစ်ခါတည်း မြင်ရအောင် နေရာရွှေ့ခြင်း
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
-        # Slider များ၏ Indentation ကို သေချာညှိထား၍ အမြဲပေါ်စေသည်
+        tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
+        if tts_engine == "Google Cloud TTS (Pro)" and not st.session_state.google_creds:
+            st.error("⚠️ Please upload 'service_account.json' in Settings Sidebar to use Google Cloud TTS.")
+
         c_fmt, c_spd = st.columns([1, 1.2]) 
         with c_fmt:
             export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
-            tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
         with c_spd:
             audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
 
         c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
+        with c_v1: 
+            target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
         with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
         with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
         
@@ -575,77 +578,56 @@ with t1:
 
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
         
-        # 🔥 လူတစ်ယောက်စီအတွက် သီးသန့်ဖိုင်နာမည်များ
-        s_id = st.session_state.session_id
-        temp_audio = f"voice_{s_id}.mp3"
-        temp_video = f"final_{s_id}.mp4"
-
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
-            
-            # 1. Generate Audio (သီးသန့်နာမည်ဖြင့်)
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, temp_audio, base_speed=audio_speed)
-                st.session_state.processed_audio_path = temp_audio # အသံဖိုင်လမ်းကြောင်း သိမ်းဆည်း
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
+                st.session_state.processed_audio_path = FILE_VOICE
             except Exception as e:
                 st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
             else:
-                # 2. Video Processing
-                p_bar.progress(50, text="🎞️ Syncing Video...")
-                input_vid = "input.mp4"
-                raw_vid_dur = get_duration(input_vid)
-                vid_dur = raw_vid_dur / video_speed 
-                aud_dur = get_duration(temp_audio)
-
+                p_bar.progress(50, text="🎞️ Processing Video...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                # Smart Sync Command (သီးသန့်ဖိုင်များဖြင့်)
+                vid_dur = get_duration(FILE_INPUT) / video_speed
+                aud_dur = get_duration(FILE_VOICE)
+                
+                cmd = ['ffmpeg', '-y', '-i', FILE_INPUT, '-i', FILE_VOICE, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', FILE_FINAL]
                 if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', temp_audio, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', temp_video]
-                else:
-                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', temp_audio, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', temp_video]
-                
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                if os.path.exists(temp_video):
-                    p_bar.progress(100, text="🎉 Video Complete!")
-                    st.session_state.processed_video_path = temp_video
-                else:
-                    st.error("❌ Rendering Fail: ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။")
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', FILE_INPUT, '-i', FILE_VOICE, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', FILE_FINAL]
 
-    # 🔥 Display Logic (အောက်ဆုံးတွင် စစ်ဆေးပြီးမှ ပြခြင်း)
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                p_bar.progress(100, text="🎉 Video Complete!")
+                st.session_state.processed_video_path = FILE_FINAL
+
     if st.session_state.processed_video_path and "Video" in export_format:
-        if os.path.exists(st.session_state.processed_video_path):
-            st.video(st.session_state.processed_video_path)
-            with open(st.session_state.processed_video_path, "rb") as f:
-                st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
+        st.video(st.session_state.processed_video_path)
+        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
 
     if st.session_state.processed_audio_path:
-        if os.path.exists(st.session_state.processed_audio_path):
-            st.audio(st.session_state.processed_audio_path)
-            with open(st.session_state.processed_audio_path, "rb") as f:
-                st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
+        st.audio(st.session_state.processed_audio_path)
+        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
     st.subheader("📝 Auto Caption")
     cap_up = st.file_uploader("Upload Video", type=['mp4','mov'], key="cap")
     if cap_up:
-        with open("cap_input.mp4", "wb") as f: f.write(cap_up.getbuffer())
+        with open(FILE_CAP_INPUT, "wb") as f: f.write(cap_up.getbuffer())
         if st.button("Generate Captions", use_container_width=True):
             check_requirements(); font_path = download_font()
             p_bar = st.progress(0, text="Processing...")
-            subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', 'cap.wav'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_CAP_WAV], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
-                segments = model.transcribe("cap.wav", task="transcribe")['segments']
+                segments = model.transcribe(FILE_CAP_WAV, task="transcribe")['segments']
                 trans_segments = []
                 total_seg = len(segments)
                 for i, seg in enumerate(segments):
@@ -658,8 +640,8 @@ with t2:
                 p_bar.progress(90, text="✍️ Burning Subtitles...")
                 ass_file = generate_ass_file(trans_segments, font_path)
                 font_dir = os.path.dirname(font_path)
-                subprocess.run(['ffmpeg', '-y', '-i', "cap_input.mp4", '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', "captioned_final.mp4"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                st.session_state.caption_video_path = "captioned_final.mp4"
+                subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={ass_file}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                st.session_state.caption_video_path = FILE_CAP_FINAL
                 p_bar.progress(100, text="Done!")
 
     if st.session_state.caption_video_path:
