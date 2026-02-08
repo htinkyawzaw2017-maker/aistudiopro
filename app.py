@@ -100,7 +100,7 @@ st.markdown("""
 
 st.markdown("""
 <div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
-    
+    <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="60"/>
     <div class="main-header">AI STUDIO PRO</div>
 </div>
 """, unsafe_allow_html=True)
