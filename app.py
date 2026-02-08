@@ -46,7 +46,7 @@ FILE_ASS = os.path.join(WORK_DIR, f"subs_{SID}.ass")
 # ---------------------------------------------------------
 # 🎨 UI SETUP
 # ---------------------------------------------------------
-st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AI Studio Pro", page_icon="", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
