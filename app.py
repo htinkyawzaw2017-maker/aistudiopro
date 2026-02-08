@@ -16,6 +16,10 @@ import re
 import requests
 import textwrap
 import math
+import uuid
+
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
 
 # 🔥 NEW: Google Cloud Imports
 from google.cloud import texttospeech
@@ -584,27 +588,46 @@ with t1:
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
             else:
-                p_bar.progress(50, text="🎞️ Processing Video...")
+                p_bar.progress(50, text="🎞️ Adjusting Video Speed & Logic...")
                 input_vid = "input.mp4"
+                raw_vid_dur = get_duration(input_vid)
+                vid_dur = raw_vid_dur / video_speed 
+                aud_dur = get_duration("voice.mp3")
+
+                # 🔥 Unique Filename သတ်မှတ်ခြင်း
+                out_vid = f"final_{st.session_state.session_id}.mp4"
+
+                p_bar.progress(80, text="🎬 Merging & Finalizing...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                vid_dur = get_duration(input_vid) / video_speed
-                aud_dur = get_duration("voice.mp3")
-                
-                cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', "dubbed_final.mp4"]
                 if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', "dubbed_final.mp4"]
-
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', out_vid]
+                else:
+                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', "voice.mp3", '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', out_vid]
+                
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                p_bar.progress(100, text="🎉 Video Complete!")
-                st.session_state.processed_video_path = "dubbed_final.mp4"
+                
+                # 🔥 ဖိုင်တကယ်ထွက်မထွက် စစ်ဆေးခြင်း
+                if os.path.exists(out_vid):
+                    p_bar.progress(100, text="🎉 Video Complete!")
+                    st.session_state.processed_video_path = out_vid
+                else:
+                    st.error("❌ Rendering Fail: ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။")
+
+
 
     if st.session_state.processed_video_path and "Video" in export_format:
-        st.video(st.session_state.processed_video_path)
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
+        # 🔥 ဖိုင်တကယ်ရှိမရှိ အရင်စစ်မယ်
+        if os.path.exists(st.session_state.processed_video_path):
+            try:
+                st.video(st.session_state.processed_video_path)
+            except Exception as e:
+                st.error("ဗီဒီယိုကို ပြသလို့မရပါဘူး။ ဖိုင်ဆိုဒ် အရမ်းကြီးနေတာ ဖြစ်နိုင်ပါတယ်။")
+        else:
+            st.error("❌ ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။ Rendering လုပ်တာ တစ်ခုခု မှားယွင်းသွားပါတယ်။")
 
     if st.session_state.processed_audio_path:
         st.audio(st.session_state.processed_audio_path)
