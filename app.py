@@ -26,23 +26,21 @@ from google.oauth2 import service_account
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
-# 🔥 CRITICAL: Create Unique Folder for EACH User
-# User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့် စနစ်
+# 🔥 User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့် စနစ်
 BASE_DIR = "user_sessions"
 USER_DIR = os.path.join(BASE_DIR, st.session_state.session_id)
 os.makedirs(USER_DIR, exist_ok=True)
 
-# Define File Paths INSIDE the User's Folder
-# ဖိုင်အားလုံးကို အဲ့ဒီ Folder ထဲမှာပဲ သိမ်းမည် (လုံးဝမရောတော့ပါ)
-FILE_INPUT = os.path.join(USER_DIR, "input_video.mp4")
-FILE_TEMP_WAV = os.path.join(USER_DIR, "temp_audio.wav")
-FILE_VOICE = os.path.join(USER_DIR, "generated_voice.mp3")
-FILE_FINAL = os.path.join(USER_DIR, "final_output.mp4")
+# ဖိုင်လမ်းကြောင်းများ (Paths) - Absolute Paths သုံးခြင်းက ပိုစိတ်ချရသည်
+FILE_INPUT = os.path.abspath(os.path.join(USER_DIR, "input_video.mp4"))
+FILE_TEMP_WAV = os.path.abspath(os.path.join(USER_DIR, "temp_audio.wav"))
+FILE_VOICE = os.path.abspath(os.path.join(USER_DIR, "generated_voice.mp3"))
+FILE_FINAL = os.path.abspath(os.path.join(USER_DIR, "final_output.mp4"))
 
-FILE_CAP_INPUT = os.path.join(USER_DIR, "caption_input.mp4")
-FILE_CAP_WAV = os.path.join(USER_DIR, "caption_audio.wav")
-FILE_CAP_FINAL = os.path.join(USER_DIR, "captioned_output.mp4")
-FILE_ASS = os.path.join(USER_DIR, "subtitles.ass")
+FILE_CAP_INPUT = os.path.abspath(os.path.join(USER_DIR, "caption_input.mp4"))
+FILE_CAP_WAV = os.path.abspath(os.path.join(USER_DIR, "caption_audio.wav"))
+FILE_CAP_FINAL = os.path.abspath(os.path.join(USER_DIR, "captioned_output.mp4"))
+FILE_ASS = os.path.abspath(os.path.join(USER_DIR, "subtitles.ass"))
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -65,6 +63,7 @@ st.markdown("""
     header[data-testid="stHeader"] {
         background-color: transparent;
     }
+    /* Sidebar Arrow Styling */
     button[kind="header"] {
         color: #00C9FF !important;
         background-color: rgba(0,0,0,0.5) !important;
@@ -165,7 +164,7 @@ def load_whisper_safe():
     except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
 # ---------------------------------------------------------
-# 🔊 AUDIO ENGINE (Path Aware)
+# 🔊 AUDIO ENGINE
 # ---------------------------------------------------------
 VOICE_MAP = {
     "Burmese": {"Male": "my-MM-ThihaNeural", "Female": "my-MM-NilarNeural"},
@@ -213,7 +212,6 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         return True
     except Exception as e: print(f"Google TTS Error: {e}"); return False
 
-# 🔥 UPDATED FUNCTION: Takes 'user_folder' as argument to keep files separate
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, user_folder, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
     base_r_int = int(base_settings['rate'].replace('%', ''))
@@ -231,9 +229,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if not part: continue
         part_lower = part.lower()
 
-        # Handle [p]
         if part_lower == "[p]":
-            # 🔥 Save chunks INSIDE user_folder
             chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -255,7 +251,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         processed_text = normalize_text_for_tts(part)
         if not processed_text.strip(): continue
         
-        # 🔥 Save chunks INSIDE user_folder
         chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}.mp3")
         
         success = False
@@ -275,11 +270,9 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
     if not audio_segments: return False, "No audio generated"
     
-    # 🔥 Concat list INSIDE user_folder
     concat_list = os.path.join(user_folder, "concat_list.txt")
     with open(concat_list, "w") as f:
         for seg in audio_segments: 
-            # FFmpeg needs safe paths
             safe_seg = seg.replace("\\", "/")
             f.write(f"file '{safe_seg}'\n")
             
@@ -415,14 +408,16 @@ with st.sidebar:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
         st.session_state.selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"], index=0)
 
-    # 🔥 NEW: Danger Zone to clear user data manually
+    # Danger Zone to clear user data manually
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
             try:
-                shutil.rmtree(USER_DIR)
-                os.makedirs(USER_DIR, exist_ok=True)
-                st.success("Data cleared!")
-                st.rerun()
+                if os.path.exists(USER_DIR):
+                    shutil.rmtree(USER_DIR)
+                    os.makedirs(USER_DIR, exist_ok=True)
+                    st.success("Data cleared!")
+                    time.sleep(1)
+                    st.rerun()
             except Exception as e: st.error(str(e))
 
     if st.button("🔴 Reset System", use_container_width=True):
@@ -443,7 +438,6 @@ with t1:
         out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
     
     if uploaded:
-        # 🔥 Write to ISOLATED folder
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("📝 Extract & Process", use_container_width=True):
@@ -522,7 +516,11 @@ with t1:
             except Exception as e: st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
-                p_bar.progress(100, text="✅ Audio Generated!")
+                # 🔥 FILE CHECK: Ensure file exists before showing
+                if os.path.exists(FILE_VOICE):
+                    p_bar.progress(100, text="✅ Audio Generated!")
+                else:
+                    st.error("❌ Audio generation failed. Please try again.")
             else:
                 p_bar.progress(50, text="🎞️ Processing Video...")
                 pts_val = 1.0 / video_speed
@@ -537,16 +535,28 @@ with t1:
                     cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', FILE_INPUT, '-i', FILE_VOICE, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', FILE_FINAL]
 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                p_bar.progress(100, text="🎉 Video Complete!")
-                st.session_state.processed_video_path = FILE_FINAL
+                
+                # 🔥 ERROR FIX: ဖိုင်တကယ်ထွက်မထွက် စစ်ပြီးမှ ပြမယ်
+                if os.path.exists(FILE_FINAL):
+                    p_bar.progress(100, text="🎉 Video Complete!")
+                    st.session_state.processed_video_path = FILE_FINAL
+                else:
+                    st.error("❌ Video generation failed. FFmpeg could not process the file.")
 
+    # 🔥 SAFE DISPLAY: Error မတက်အောင် ကာကွယ်ထားသောနေရာ
     if st.session_state.processed_video_path and "Video" in export_format:
-        st.video(st.session_state.processed_video_path)
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
+        if os.path.exists(st.session_state.processed_video_path):
+            st.video(st.session_state.processed_video_path)
+            with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
+        else:
+            st.warning("⚠️ File not found. Please regenerate.")
 
     if st.session_state.processed_audio_path:
-        st.audio(st.session_state.processed_audio_path)
-        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
+        if os.path.exists(st.session_state.processed_audio_path):
+            st.audio(st.session_state.processed_audio_path)
+            with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
+        else:
+            st.warning("⚠️ Audio file not found. Please regenerate.")
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
@@ -570,16 +580,23 @@ with t2:
                         trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
                         time.sleep(0.3)
                 p_bar.progress(90, text="✍️ Burning Subtitles...")
-                # 🔥 Pass FILE_ASS to function
+                
                 generate_ass_file(trans_segments, font_path, FILE_ASS)
                 font_dir = os.path.dirname(font_path)
                 subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={FILE_ASS}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                st.session_state.caption_video_path = FILE_CAP_FINAL
-                p_bar.progress(100, text="Done!")
+                
+                if os.path.exists(FILE_CAP_FINAL):
+                    st.session_state.caption_video_path = FILE_CAP_FINAL
+                    p_bar.progress(100, text="Done!")
+                else:
+                    st.error("❌ Caption generation failed.")
 
     if st.session_state.caption_video_path:
-        st.video(st.session_state.caption_video_path)
-        with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4", use_container_width=True)
+        if os.path.exists(st.session_state.caption_video_path):
+            st.video(st.session_state.caption_video_path)
+            with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4", use_container_width=True)
+        else:
+            st.warning("⚠️ File not found.")
 
 # === TAB 3: VIRAL SEO ===
 with t3:
