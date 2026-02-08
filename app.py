@@ -21,26 +21,27 @@ from google.cloud import texttospeech
 from google.oauth2 import service_account
 
 # ---------------------------------------------------------
-# 🛡️ SYSTEM SETUP & FOLDER ISOLATION
+# 🛠️ SYSTEM SETUP (ROBUST FILE HANDLING)
 # ---------------------------------------------------------
+# Absolute Path မသုံးမဖြစ် သုံးရမည် (Streamlit Cloud အတွက်)
+WORK_DIR = os.path.abspath("temp_workspace")
+os.makedirs(WORK_DIR, exist_ok=True)
+
 if 'session_id' not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
+    st.session_state.session_id = str(uuid.uuid4())[:8]
 
-# 🔥 User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့် စနစ်
-BASE_DIR = "user_sessions"
-USER_DIR = os.path.join(BASE_DIR, st.session_state.session_id)
-os.makedirs(USER_DIR, exist_ok=True)
+SID = st.session_state.session_id
 
-# ဖိုင်လမ်းကြောင်းများ (Paths) - Absolute Paths သုံးခြင်းက ပိုစိတ်ချရသည်
-FILE_INPUT = os.path.abspath(os.path.join(USER_DIR, "input_video.mp4"))
-FILE_TEMP_WAV = os.path.abspath(os.path.join(USER_DIR, "temp_audio.wav"))
-FILE_VOICE = os.path.abspath(os.path.join(USER_DIR, "generated_voice.mp3"))
-FILE_FINAL = os.path.abspath(os.path.join(USER_DIR, "final_output.mp4"))
+# ဖိုင်လမ်းကြောင်းများကို Absolute Path ဖြင့် တိတိကျကျ သတ်မှတ်ခြင်း
+FILE_INPUT = os.path.join(WORK_DIR, f"input_{SID}.mp4")
+FILE_AUDIO_RAW = os.path.join(WORK_DIR, f"temp_audio_{SID}.wav")
+FILE_VOICE = os.path.join(WORK_DIR, f"generated_voice_{SID}.mp3")
+FILE_FINAL = os.path.join(WORK_DIR, f"final_output_{SID}.mp4")
 
-FILE_CAP_INPUT = os.path.abspath(os.path.join(USER_DIR, "caption_input.mp4"))
-FILE_CAP_WAV = os.path.abspath(os.path.join(USER_DIR, "caption_audio.wav"))
-FILE_CAP_FINAL = os.path.abspath(os.path.join(USER_DIR, "captioned_output.mp4"))
-FILE_ASS = os.path.abspath(os.path.join(USER_DIR, "subtitles.ass"))
+FILE_CAP_INPUT = os.path.join(WORK_DIR, f"cap_input_{SID}.mp4")
+FILE_CAP_WAV = os.path.join(WORK_DIR, f"cap_audio_{SID}.wav")
+FILE_CAP_FINAL = os.path.join(WORK_DIR, f"captioned_{SID}.mp4")
+FILE_ASS = os.path.join(WORK_DIR, f"subs_{SID}.ass")
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -63,7 +64,6 @@ st.markdown("""
     header[data-testid="stHeader"] {
         background-color: transparent;
     }
-    /* Sidebar Arrow Styling */
     button[kind="header"] {
         color: #00C9FF !important;
         background-color: rgba(0,0,0,0.5) !important;
@@ -150,14 +150,14 @@ def get_duration(path):
     except: return 0.0
 
 def download_font():
-    font_filename = "Padauk-Bold.ttf"
-    if not os.path.exists(font_filename):
+    font_path = os.path.join(WORK_DIR, "Padauk-Bold.ttf")
+    if not os.path.exists(font_path):
         url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
         try:
             r = requests.get(url, timeout=10)
-            with open(font_filename, 'wb') as f: f.write(r.content)
+            with open(font_path, 'wb') as f: f.write(r.content)
         except: pass
-    return os.path.abspath(font_filename)
+    return font_path
 
 def load_whisper_safe():
     try: return whisper.load_model("base")
@@ -212,7 +212,7 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         return True
     except Exception as e: print(f"Google TTS Error: {e}"); return False
 
-def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, user_folder, engine="Edge TTS", base_speed=1.0):
+def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
     base_r_int = int(base_settings['rate'].replace('%', ''))
     base_p_int = int(base_settings['pitch'].replace('Hz', ''))
@@ -230,7 +230,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         part_lower = part.lower()
 
         if part_lower == "[p]":
-            chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}_silence.mp3")
+            chunk_filename = os.path.join(WORK_DIR, f"chunk_{SID}_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(chunk_filename):
@@ -251,7 +251,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         processed_text = normalize_text_for_tts(part)
         if not processed_text.strip(): continue
         
-        chunk_filename = os.path.join(user_folder, f"chunk_{chunk_idx}.mp3")
+        chunk_filename = os.path.join(WORK_DIR, f"chunk_{SID}_{chunk_idx}.mp3")
         
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
@@ -270,11 +270,11 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
     if not audio_segments: return False, "No audio generated"
     
-    concat_list = os.path.join(user_folder, "concat_list.txt")
+    concat_list = os.path.join(WORK_DIR, f"concat_{SID}.txt")
     with open(concat_list, "w") as f:
         for seg in audio_segments: 
-            safe_seg = seg.replace("\\", "/")
-            f.write(f"file '{safe_seg}'\n")
+            # Absolute path ကို Safe ဖြစ်အောင် ရေးမယ်
+            f.write(f"file '{seg}'\n")
             
     try:
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -412,9 +412,9 @@ with st.sidebar:
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
             try:
-                if os.path.exists(USER_DIR):
-                    shutil.rmtree(USER_DIR)
-                    os.makedirs(USER_DIR, exist_ok=True)
+                if os.path.exists(WORK_DIR):
+                    shutil.rmtree(WORK_DIR)
+                    os.makedirs(WORK_DIR, exist_ok=True)
                     st.success("Data cleared!")
                     time.sleep(1)
                     st.rerun()
@@ -444,12 +444,13 @@ with t1:
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
             p_bar.progress(20, text="🎤 Transcribing Audio...")
-            subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_TEMP_WAV], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Use Audio extraction
+            subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             model = load_whisper_safe()
             if model:
                 lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
                 lang_code = lang_map.get(in_lang, "en")
-                raw = model.transcribe(FILE_TEMP_WAV, language=lang_code)['text']
+                raw = model.transcribe(FILE_AUDIO_RAW, language=lang_code)['text']
                 st.session_state.raw_transcript = raw
                 p_bar.progress(60, text="🧠 AI Processing...")
                 
@@ -508,55 +509,77 @@ with t1:
         
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
+            
+            # Step 1: Check Script
+            if not txt.strip():
+                st.error("❌ Script is empty! Please generate or write a script first.")
+                st.stop()
+
+            # Step 2: Audio Generation
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                # 🔥 Pass USER_DIR to function
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, USER_DIR, engine=tts_engine, base_speed=audio_speed)
+                success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
+                if not success:
+                    st.error(f"❌ Audio Gen Failed: {msg}")
+                    st.stop()
                 st.session_state.processed_audio_path = FILE_VOICE
             except Exception as e: st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
-                # 🔥 FILE CHECK: Ensure file exists before showing
-                if os.path.exists(FILE_VOICE):
+                if os.path.exists(FILE_VOICE) and os.path.getsize(FILE_VOICE) > 0:
                     p_bar.progress(100, text="✅ Audio Generated!")
                 else:
-                    st.error("❌ Audio generation failed. Please try again.")
+                    st.error("❌ Audio generation failed. Zero byte file.")
             else:
-                p_bar.progress(50, text="🎞️ Processing Video...")
+                # Step 3: Video Rendering (Robust)
+                p_bar.progress(50, text="🎞️ Processing Video (This may take a moment)...")
+                
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
+                
                 vid_dur = get_duration(FILE_INPUT) / video_speed
                 aud_dur = get_duration(FILE_VOICE)
                 
-                cmd = ['ffmpeg', '-y', '-i', FILE_INPUT, '-i', FILE_VOICE, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', FILE_FINAL]
-                if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', FILE_INPUT, '-i', FILE_VOICE, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', FILE_FINAL]
-
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Use -preset ultrafast for speed and -y to overwrite
+                cmd = ['ffmpeg', '-y', '-i', FILE_INPUT, '-i', FILE_VOICE, 
+                       '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
+                       '-map', '[vzoom]', '-map', '1:a', 
+                       '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
+                       FILE_FINAL]
                 
-                # 🔥 ERROR FIX: ဖိုင်တကယ်ထွက်မထွက် စစ်ပြီးမှ ပြမယ်
-                if os.path.exists(FILE_FINAL):
+                if aud_dur > vid_dur:
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', FILE_INPUT, '-i', FILE_VOICE, 
+                           '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
+                           '-map', '[vzoom]', '-map', '1:a', 
+                           '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
+                           '-shortest', FILE_FINAL]
+
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode == 0 and os.path.exists(FILE_FINAL):
                     p_bar.progress(100, text="🎉 Video Complete!")
                     st.session_state.processed_video_path = FILE_FINAL
                 else:
-                    st.error("❌ Video generation failed. FFmpeg could not process the file.")
+                    st.error("❌ Video generation failed.")
+                    with st.expander("View Error Details"):
+                        st.text(result.stderr)
 
-    # 🔥 SAFE DISPLAY: Error မတက်အောင် ကာကွယ်ထားသောနေရာ
+    # Display Results with Safe Checks
     if st.session_state.processed_video_path and "Video" in export_format:
         if os.path.exists(st.session_state.processed_video_path):
             st.video(st.session_state.processed_video_path)
             with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
         else:
-            st.warning("⚠️ File not found. Please regenerate.")
+            st.warning("⚠️ Video file missing. Please regenerate.")
 
     if st.session_state.processed_audio_path:
         if os.path.exists(st.session_state.processed_audio_path):
             st.audio(st.session_state.processed_audio_path)
             with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
         else:
-            st.warning("⚠️ Audio file not found. Please regenerate.")
+            st.warning("⚠️ Audio file missing.")
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
@@ -583,7 +606,7 @@ with t2:
                 
                 generate_ass_file(trans_segments, font_path, FILE_ASS)
                 font_dir = os.path.dirname(font_path)
-                subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={FILE_ASS}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'fast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={FILE_ASS}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 if os.path.exists(FILE_CAP_FINAL):
                     st.session_state.caption_video_path = FILE_CAP_FINAL
