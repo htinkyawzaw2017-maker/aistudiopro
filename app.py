@@ -575,52 +575,57 @@ with t1:
 
         btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
         
+        # 🔥 လူတစ်ယောက်စီအတွက် သီးသန့်ဖိုင်နာမည်များ
+        s_id = st.session_state.session_id
+        temp_audio = f"voice_{s_id}.mp3"
+        temp_video = f"final_{s_id}.mp4"
+
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
+            
+            # 1. Generate Audio (သီးသန့်နာမည်ဖြင့်)
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                # Unique voice file name ကို သုံးခြင်း
-                generate_audio_with_emotions(txt, target_lang, gender, v_mode, user_voice_mp3, engine=tts_engine, base_speed=audio_speed)
-                st.session_state.processed_audio_path = user_voice_mp3
+                generate_audio_with_emotions(txt, target_lang, gender, v_mode, temp_audio, base_speed=audio_speed)
+                st.session_state.processed_audio_path = temp_audio # အသံဖိုင်လမ်းကြောင်း သိမ်းဆည်း
             except Exception as e:
                 st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated!")
             else:
-                p_bar.progress(50, text="🎞️ Rendering Video...")
-                raw_vid_dur = get_duration(user_input_vid)
+                # 2. Video Processing
+                p_bar.progress(50, text="🎞️ Syncing Video...")
+                input_vid = "input.mp4"
+                raw_vid_dur = get_duration(input_vid)
                 vid_dur = raw_vid_dur / video_speed 
-                aud_dur = get_duration(user_voice_mp3)
+                aud_dur = get_duration(temp_audio)
 
-                p_bar.progress(80, text="🎬 Final Merging...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                # 🔥 SMART SYNC: Unique names ကိုသာ အစအဆုံး သုံးထားသည်
+                # Smart Sync Command (သီးသန့်ဖိုင်များဖြင့်)
                 if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', user_input_vid, '-i', user_voice_mp3, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', user_final_vid]
+                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', input_vid, '-i', temp_audio, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', temp_video]
                 else:
-                    cmd = ['ffmpeg', '-y', '-i', user_input_vid, '-i', user_voice_mp3, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', user_final_vid]
+                    cmd = ['ffmpeg', '-y', '-i', input_vid, '-i', temp_audio, '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-c:a', 'aac', temp_video]
                 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                if os.path.exists(user_final_vid):
+                if os.path.exists(temp_video):
                     p_bar.progress(100, text="🎉 Video Complete!")
-                    st.session_state.processed_video_path = user_final_vid
+                    st.session_state.processed_video_path = temp_video
                 else:
                     st.error("❌ Rendering Fail: ဗီဒီယိုဖိုင် ထွက်မလာပါဘူး။")
 
-    # Results Display
+    # 🔥 Display Logic (အောက်ဆုံးတွင် စစ်ဆေးပြီးမှ ပြခြင်း)
     if st.session_state.processed_video_path and "Video" in export_format:
         if os.path.exists(st.session_state.processed_video_path):
             st.video(st.session_state.processed_video_path)
             with open(st.session_state.processed_video_path, "rb") as f:
-                st.download_button("🎬 Download Video", f, "final_recap.mp4", use_container_width=True)
-        else:
-            st.error("❌ ဗီဒီယိုဖိုင်ကို ရှာမတွေ့ပါ။ တစ်ခါပြန် Render လုပ်ပေးပါ။")
+                st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
 
     if st.session_state.processed_audio_path:
         if os.path.exists(st.session_state.processed_audio_path):
