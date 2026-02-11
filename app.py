@@ -357,7 +357,7 @@ def get_model(api_key, model_name):
 def generate_with_retry(prompt):
     keys = st.session_state.api_keys
     # 🔥 Use 1.5 Pro by default for stability, or user choice
-    model_name = st.session_state.get("selected_model", "gemini-1.5-pro") 
+    model_name = st.session_state.get("selected_model", "gemini-2.5-flash") 
     
     custom_rules = load_custom_dictionary()
     if custom_rules: prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
