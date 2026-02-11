@@ -1,4 +1,4 @@
-import warnings
+ငimport warnings
 warnings.filterwarnings("ignore")
 import os
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -428,70 +428,127 @@ if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys"); st
 
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
+
+
 # === TAB 1: DUBBING STUDIO ===
 with t1:
     col_up, col_set = st.columns([2, 1])
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        in_lang = st.selectbox("Input (Video Language)", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
-        out_lang = st.selectbox("Output (Script & Voice)", ["Burmese", "English", "Japanese", "Chinese", "Thai"])
+        # 🔥 NEW: Mode Selection (ဘာလုပ်မလဲ ရွေးခိုင်းမယ်)
+        task_mode = st.radio("Mode", ["🗣️ Translate (Dubbing)", "👀 AI Narration (Silent Video)"])
+        
+        # Mode အလိုက် ပြောင်းလဲမည့် Setting များ
+        if task_mode == "🗣️ Translate (Dubbing)":
+            in_lang = st.selectbox("Input Language", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
+        else:
+            # Narration အတွက် Vibe ရွေးခိုင်းမယ်
+            vibe = st.selectbox("Narration Style", ["Vlog/Casual", "Tutorial/Explainer", "Relaxing/ASMR", "Exciting/Unboxing"])
+            
+        out_lang = st.selectbox("Output Language", ["Burmese", "English"], index=0)
     
     if uploaded:
+        # ဖိုင်သိမ်းမယ်
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
-        if st.button("📝 Extract & Process", use_container_width=True):
+        if st.button("🚀 Start Magic", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
-            p_bar.progress(20, text="🎤 Transcribing Audio...")
-            # Use Audio extraction
-            subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            model = load_whisper_safe()
-            if model:
-                lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
-                lang_code = lang_map.get(in_lang, "en")
-                raw = model.transcribe(FILE_AUDIO_RAW, language=lang_code)['text']
-                st.session_state.raw_transcript = raw
-                p_bar.progress(60, text="🧠 AI Processing...")
+
+            # ---------------------------------------------------------
+            # PATH A: TRANSLATION (နဂို မူလ အသံဘာသာပြန်စနစ်)
+            # ---------------------------------------------------------
+            if task_mode == "🗣️ Translate (Dubbing)":
+                p_bar.progress(20, text="🎤 Listening to Audio...")
+                # Audio ထုတ်မယ်
+                subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                                # 🔥 UPDATED: Dramatic Recap Style
-                recap_style_guide = """
-                ROLE: You are a famous Myanmar Movie Recap Narrator.
-                TONE: Dramatic, Flowing, Suspenseful.
+                # Whisper နဲ့ နားထောင်မယ်
+                model = load_whisper_safe()
+                if model:
+                    lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
+                    lang_code = lang_map.get(in_lang, "en")
+                    
+                    raw = model.transcribe(FILE_AUDIO_RAW, language=lang_code)['text']
+                    st.session_state.raw_transcript = raw
+                    
+                    p_bar.progress(50, text="🧠 Translating...")
+                    
+                    # Prompt Logic
+                    recap_style_guide = """
+                    ROLE: You are a famous Myanmar Movie Recap Narrator.
+                    TONE: Dramatic, Flowing, Suspenseful.
+                    STRICT WRITING RULES:
+                    1. Use dramatic vocabulary (e.g., 'မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်' instead of 'တွေ့တယ်').
+                    2. Connect sentences smoothly using Cause & Effect.
+                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ'.
+                    4. Do not use robotic fillers.
+                    """
+                    
+                    if in_lang == out_lang:
+                        prompt = f"""{recap_style_guide}
+                        TASK: Rewrite the input into a flowing, dramatic Movie Recap script.
+                        Input: '{raw}'"""
+                    else:
+                        prompt = f"""{recap_style_guide}
+                        TASK: Translate the {in_lang} text into a flowing, dramatic Burmese Movie Recap script.
+                        Input: '{raw}'"""
+                    
+                    st.session_state.final_script = generate_with_retry(prompt)
 
-                STRICT WRITING RULES:
-                1. **BETTER VOCABULARY:**
-                   - Instead of 'တွေ့လိုက်တယ်', use 'တွေ့လိုက်ရပါတယ်' or 'မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်'.
-                   - Instead of 'ထွက်ပြေးတယ်', use 'ကြောက်လန့်တကြား ထွက်ပြေးသွားခဲ့ပါတယ်'.
-                   - Instead of 'သေသွားတယ်', use 'အသက်ပါ ဆုံးရှုံးလိုက်ရပါတယ်'.
+            # ---------------------------------------------------------
+            # 🔥 PATH B: AI NARRATION (အသစ်ထည့်လိုက်သော Vision စနစ်)
+            # ---------------------------------------------------------
+            else:
+                p_bar.progress(20, text="👀 AI is watching video...")
+                try:
+                    # 1. Upload Video to Gemini File API
+                    # API Key ရှိမရှိ စစ်မယ်
+                    if not st.session_state.api_keys:
+                        st.error("Please enter Gemini API Key in sidebar first!")
+                        st.stop()
+                        
+                    genai.configure(api_key=st.session_state.api_keys[0])
+                    video_file = genai.upload_file(path=FILE_INPUT)
+                    
+                    # 2. Wait for processing (Gemini ဘက်က Video ready ဖြစ်တဲ့ထိ စောင့်)
+                    while video_file.state.name == "PROCESSING":
+                        time.sleep(2)
+                        video_file = genai.get_file(video_file.name)
 
-                2. **CONNECTING SENTENCES (IMPORTANT):**
-                   - Do NOT write short, choppy sentences.
-                   - **COMBINE** actions using Cause & Effect.
-                   - Example: "သရဲကို တွေ့လိုက်ရတဲ့အတွက် ကြောက်လန့်ပြီး ချက်ချင်းပဲ ထွက်ပြေးသွားပါတော့တယ်" (Use 'ဒါကြောင့်', 'ထို့နောက်', 'မထင်မှတ်ဘဲ').
+                    # 3. Generate Narration Script
+                    p_bar.progress(50, text="✍️ Writing Script...")
+                    
+                    prompt = f"""
+                    ROLE: You are a professional Video Narrator/YouTuber.
+                    TASK: Watch this video and write a voiceover script in {out_lang}.
+                    STYLE: {vibe}.
+                    
+                    RULES:
+                    1. Describe what is happening on screen naturally as if you are doing it.
+                    2. Match the pacing of the video.
+                    3. Use engaging, spoken-style language (For Burmese: Use 'ပါတယ်', 'နော်', 'လေ', 'ကြည့်လိုက်ပါဦး').
+                    4. Do NOT say 'The video shows...'. Just narrate it like a Story/Vlog.
+                    5. Keep it fun and engaging.
+                    """
+                    
+                    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+                    response = model.generate_content([video_file, prompt])
+                    st.session_state.final_script = response.text
+                    
+                    # Cleanup Cloud File (အလုပ်ပြီးရင် ဖျက်မယ်)
+                    genai.delete_file(video_file.name)
+                    
+                except Exception as e:
+                    st.error(f"AI Vision Error: {e}")
+                    st.stop()
 
-                3. **SENTENCE ENDINGS:**
-                   - Use 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ', 'လိုက်ပါတော့တယ်'.
-                   - Mix them up. Do not repeat the same ending.
+            p_bar.progress(100, text="✅ Script Ready!")
+            st.rerun()
 
-                4. **FORBIDDEN:** - Do NOT use 'ပေါ့လေ', 'နော်', 'ဗျ', 'သည်','အဲဒီတော့', 'ဗြုန်းကနဲ့'.
-                   - Use 'ရုတ်တရက်' instead of 'ဗြုန်းကနဲ့'.
-                """
+    
 
-                # Logic for Prompt Generation
-                if in_lang == out_lang:
-                    prompt = f"""{recap_style_guide}
-                    TASK: Rewrite the input into a flowing, dramatic Movie Recap script.
-                    Input: '{raw}'"""
-                else:
-                    prompt = f"""{recap_style_guide}
-                    TASK: Translate the {in_lang} text into a flowing, dramatic Burmese Movie Recap script.
-                    Focus on connecting sentences smoothly.
-                    Input: '{raw}'"""
-
-                st.session_state.final_script = generate_with_retry(prompt)
-                p_bar.progress(100, text="✅ Done!")
-                st.rerun()
         
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
