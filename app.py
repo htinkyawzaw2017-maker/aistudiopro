@@ -21,27 +21,34 @@ from google.cloud import texttospeech
 from google.oauth2 import service_account
 
 # ---------------------------------------------------------
-# 🛠️ SYSTEM SETUP (ROBUST FILE HANDLING)
+# 🛡️ 1. SESSION & FOLDER ISOLATION (THE FIX)
 # ---------------------------------------------------------
-# Error မတက်စေရန် Absolute Path ကိုအသုံးပြုခြင်း
-WORK_DIR = os.path.abspath("temp_workspace")
-os.makedirs(WORK_DIR, exist_ok=True)
+# ရှင်းလင်းချက်: User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့်စနစ်
+# အရင်လို Folder တစ်ခုတည်းမှာ ဖိုင်တွေ စုမပုံတော့ပါ။
 
 if 'session_id' not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())[:8]
+    # 32-character unique ID to guarantee NO collisions
+    st.session_state.session_id = uuid.uuid4().hex
 
 SID = st.session_state.session_id
 
-# ဖိုင်လမ်းကြောင်းများကို Absolute Path ဖြင့် တိတိကျကျ သတ်မှတ်ခြင်း (User တစ်ယောက်ချင်းစီမရောအောင် SID ခံထားသည်)
-FILE_INPUT = os.path.join(WORK_DIR, f"input_{SID}.mp4")
-FILE_AUDIO_RAW = os.path.join(WORK_DIR, f"temp_audio_{SID}.wav")
-FILE_VOICE = os.path.join(WORK_DIR, f"generated_voice_{SID}.mp3")
-FILE_FINAL = os.path.join(WORK_DIR, f"final_output_{SID}.mp4")
+# Main Work Directory
+BASE_WORK_DIR = os.path.abspath("user_sessions")
 
-FILE_CAP_INPUT = os.path.join(WORK_DIR, f"cap_input_{SID}.mp4")
-FILE_CAP_WAV = os.path.join(WORK_DIR, f"cap_audio_{SID}.wav")
-FILE_CAP_FINAL = os.path.join(WORK_DIR, f"captioned_{SID}.mp4")
-FILE_ASS = os.path.join(WORK_DIR, f"subs_{SID}.ass")
+# Create a UNIQUE sub-folder for THIS user only
+USER_SESSION_DIR = os.path.join(BASE_WORK_DIR, SID)
+os.makedirs(USER_SESSION_DIR, exist_ok=True)
+
+# Define clean file paths (No need to append IDs to filenames anymore, the Folder is already unique)
+FILE_INPUT = os.path.join(USER_SESSION_DIR, "input_video.mp4")
+FILE_AUDIO_RAW = os.path.join(USER_SESSION_DIR, "extracted_audio.wav")
+FILE_VOICE = os.path.join(USER_SESSION_DIR, "ai_voice.mp3")
+FILE_FINAL = os.path.join(USER_SESSION_DIR, "final_dubbed_video.mp4")
+
+FILE_CAP_INPUT = os.path.join(USER_SESSION_DIR, "caption_input_video.mp4")
+FILE_CAP_WAV = os.path.join(USER_SESSION_DIR, "caption_audio.wav")
+FILE_CAP_FINAL = os.path.join(USER_SESSION_DIR, "captioned_output.mp4")
+FILE_ASS = os.path.join(USER_SESSION_DIR, "subtitles.ass")
 
 # ---------------------------------------------------------
 # 🎨 UI SETUP
@@ -150,7 +157,12 @@ def get_duration(path):
     except: return 0.0
 
 def download_font():
-    font_path = os.path.join(WORK_DIR, "Padauk-Bold.ttf")
+    # Save font in the user's isolated directory or a shared cache
+    # Using shared cache for font is fine
+    font_dir = os.path.abspath("fonts_cache")
+    os.makedirs(font_dir, exist_ok=True)
+    font_path = os.path.join(font_dir, "Padauk-Bold.ttf")
+    
     if not os.path.exists(font_path):
         url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
         try:
@@ -161,7 +173,7 @@ def download_font():
 
 def load_whisper_safe():
     try: return whisper.load_model("base")
-    except Exception as e: st.error(f"Whisper Error: {e}"); return None
+    except Exception as e: st.error(f"Whisper Error (Try reloading): {e}"); return None
 
 # ---------------------------------------------------------
 # 🔊 AUDIO ENGINE
@@ -224,6 +236,9 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
     audio_segments = []
     chunk_idx = 0
 
+    # Ensure output_file path is safe
+    output_dir = os.path.dirname(output_file)
+    
     for part in parts:
         part = part.strip()
         if not part: continue
@@ -231,7 +246,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
         # Handle [p] tag as silence
         if part_lower == "[p]":
-            chunk_filename = os.path.join(WORK_DIR, f"chunk_{SID}_{chunk_idx}_silence.mp3")
+            chunk_filename = os.path.join(output_dir, f"chunk_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(chunk_filename):
@@ -252,7 +267,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         processed_text = normalize_text_for_tts(part)
         if not processed_text.strip(): continue
         
-        chunk_filename = os.path.join(WORK_DIR, f"chunk_{SID}_{chunk_idx}.mp3")
+        chunk_filename = os.path.join(output_dir, f"chunk_{chunk_idx}.mp3")
         
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
@@ -272,7 +287,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
     if not audio_segments: return False, "No audio generated"
     
     # Merge all chunks
-    concat_list = os.path.join(WORK_DIR, f"concat_{SID}.txt")
+    concat_list = os.path.join(output_dir, "concat_list.txt")
     with open(concat_list, "w") as f:
         for seg in audio_segments: 
             f.write(f"file '{seg}'\n")
@@ -333,7 +348,7 @@ def normalize_text_for_tts(text):
     return text
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE
+# 🧠 AI ENGINE (GEMINI)
 # ---------------------------------------------------------
 def get_model(api_key, model_name):
     genai.configure(api_key=api_key)
@@ -341,7 +356,9 @@ def get_model(api_key, model_name):
 
 def generate_with_retry(prompt):
     keys = st.session_state.api_keys
-    model_name = st.session_state.get("selected_model", "gemini-2.5-flash")
+    # 🔥 Use 1.5 Pro by default for stability, or user choice
+    model_name = st.session_state.get("selected_model", "gemini-1.5-pro") 
+    
     custom_rules = load_custom_dictionary()
     if custom_rules: prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
     for i, key in enumerate(keys):
@@ -407,15 +424,18 @@ with st.sidebar:
         api_key_input = st.text_input("Gemini API Keys", value=default_keys, type="password")
         if api_key_input:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        st.session_state.selected_model = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash-exp"], index=0)
+        
+        # 🔥 UPDATED MODEL LIST: Removed 2.0-exp if causing issues, Added 1.5 Pro as Default
+        st.session_state.selected_model = st.selectbox("Model", ["gemini-1.5-pro", "gemini-2.5-flash"], index=0)
 
     # Danger Zone to clear user data manually
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
             try:
-                if os.path.exists(WORK_DIR):
-                    shutil.rmtree(WORK_DIR)
-                    os.makedirs(WORK_DIR, exist_ok=True)
+                # Only clear CURRENT USER'S folder
+                if os.path.exists(USER_SESSION_DIR):
+                    shutil.rmtree(USER_SESSION_DIR)
+                    os.makedirs(USER_SESSION_DIR, exist_ok=True)
                     st.success("Data cleared!")
                     time.sleep(1)
                     st.rerun()
@@ -435,10 +455,9 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 Mode Selection (Translate vs Vision Narration)
+        # 🔥 Mode Selection
         task_mode = st.radio("Mode", ["🗣️ Translate (Dubbing)", "👀 AI Narration (Silent Video)"])
         
-        # Mode Logic
         if task_mode == "🗣️ Translate (Dubbing)":
             in_lang = st.selectbox("Input Language", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
         else:
@@ -447,6 +466,7 @@ with t1:
         out_lang = st.selectbox("Output Language", ["Burmese", "English"], index=0)
     
     if uploaded:
+        # Save to USER ISOLATED DIRECTORY
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("🚀 Start Magic", use_container_width=True):
@@ -528,12 +548,13 @@ with t1:
                     RULES:
                     1. Describe what is happening on screen naturally as if you are doing it.
                     2. Match the pacing of the video.
-                    3. Use engaging, spoken-style language (For Burmese: Use 'ပါတယ်', 'နော်', 'လေ', 'ကြည့်လိုက်ပါဦး').
+                    3. Use engaging, spoken-style language (For Burmese: Use 'ပါတယ်', '', '', 'ကြည့်လိုက်ပါဦး').
                     4. Do NOT say 'The video shows...'. Just narrate it like a Story/Vlog.
                     5. Keep it fun and engaging.
                     """
                     
-                    model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+                    # Ensure we use 1.5 Pro or User Selection
+                    model = genai.GenerativeModel(model_name=st.session_state.selected_model)
                     response = model.generate_content([video_file, prompt])
                     st.session_state.final_script = response.text
                     genai.delete_file(video_file.name) # Cleanup
@@ -600,7 +621,7 @@ with t1:
             # Step 2: Audio Generation
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
-                # WORK_DIR ကို parameter အဖြစ်ထည့်ပေးလိုက်ပါသည်
+                # Use Isolated paths
                 success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
                 if not success:
                     st.error(f"❌ Audio Gen Failed: {msg}")
@@ -641,7 +662,7 @@ with t1:
 
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 
-                # 🔥 ERROR FIX: ဖိုင်တကယ်ထွက်မထွက် စစ်ပြီးမှ ပြမယ်
+                # Check for Success
                 if result.returncode == 0 and os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
                     p_bar.progress(100, text="🎉 Video Complete!")
                     st.session_state.processed_video_path = FILE_FINAL
