@@ -428,9 +428,7 @@ if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys"); st
 
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
-
-
-# === TAB 1: DUBBING STUDIO ===
+   # === TAB 1: DUBBING STUDIO ===
 with t1:
     col_up, col_set = st.columns([2, 1])
     with col_up:
@@ -546,6 +544,12 @@ with t1:
 
             p_bar.progress(100, text="✅ Script Ready!")
             st.rerun()
+
+
+
+  
+
+
 
     
 
