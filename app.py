@@ -1,4 +1,4 @@
-ငimport warnings
+import warnings
 warnings.filterwarnings("ignore")
 import os
 os.environ["GRPC_VERBOSITY"] = "ERROR"
@@ -23,7 +23,7 @@ from google.oauth2 import service_account
 # ---------------------------------------------------------
 # 🛠️ SYSTEM SETUP (ROBUST FILE HANDLING)
 # ---------------------------------------------------------
-# Absolute Path မသုံးမဖြစ် သုံးရမည် (Streamlit Cloud အတွက်)
+# Error မတက်စေရန် Absolute Path ကိုအသုံးပြုခြင်း
 WORK_DIR = os.path.abspath("temp_workspace")
 os.makedirs(WORK_DIR, exist_ok=True)
 
@@ -32,7 +32,7 @@ if 'session_id' not in st.session_state:
 
 SID = st.session_state.session_id
 
-# ဖိုင်လမ်းကြောင်းများကို Absolute Path ဖြင့် တိတိကျကျ သတ်မှတ်ခြင်း
+# ဖိုင်လမ်းကြောင်းများကို Absolute Path ဖြင့် တိတိကျကျ သတ်မှတ်ခြင်း (User တစ်ယောက်ချင်းစီမရောအောင် SID ခံထားသည်)
 FILE_INPUT = os.path.join(WORK_DIR, f"input_{SID}.mp4")
 FILE_AUDIO_RAW = os.path.join(WORK_DIR, f"temp_audio_{SID}.wav")
 FILE_VOICE = os.path.join(WORK_DIR, f"generated_voice_{SID}.mp3")
@@ -46,7 +46,7 @@ FILE_ASS = os.path.join(WORK_DIR, f"subs_{SID}.ass")
 # ---------------------------------------------------------
 # 🎨 UI SETUP
 # ---------------------------------------------------------
-st.set_page_config(page_title="AI Studio Pro", page_icon="", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -101,7 +101,7 @@ st.markdown("""
 st.markdown("""
 <div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
     <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="60"/>
-    <div class="main-header">AI STUDIO PRO</div>
+    <div class="main-header">MYANMAR AI STUDIO PRO</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -229,6 +229,7 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if not part: continue
         part_lower = part.lower()
 
+        # Handle [p] tag as silence
         if part_lower == "[p]":
             chunk_filename = os.path.join(WORK_DIR, f"chunk_{SID}_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
@@ -270,10 +271,10 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
     if not audio_segments: return False, "No audio generated"
     
+    # Merge all chunks
     concat_list = os.path.join(WORK_DIR, f"concat_{SID}.txt")
     with open(concat_list, "w") as f:
         for seg in audio_segments: 
-            # Absolute path ကို Safe ဖြစ်အောင် ရေးမယ်
             f.write(f"file '{seg}'\n")
             
     try:
@@ -428,26 +429,24 @@ if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys"); st
 
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
-   # === TAB 1: DUBBING STUDIO ===
+# === TAB 1: DUBBING STUDIO ===
 with t1:
     col_up, col_set = st.columns([2, 1])
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 NEW: Mode Selection (ဘာလုပ်မလဲ ရွေးခိုင်းမယ်)
+        # 🔥 Mode Selection (Translate vs Vision Narration)
         task_mode = st.radio("Mode", ["🗣️ Translate (Dubbing)", "👀 AI Narration (Silent Video)"])
         
-        # Mode အလိုက် ပြောင်းလဲမည့် Setting များ
+        # Mode Logic
         if task_mode == "🗣️ Translate (Dubbing)":
             in_lang = st.selectbox("Input Language", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
         else:
-            # Narration အတွက် Vibe ရွေးခိုင်းမယ်
             vibe = st.selectbox("Narration Style", ["Vlog/Casual", "Tutorial/Explainer", "Relaxing/ASMR", "Exciting/Unboxing"])
             
         out_lang = st.selectbox("Output Language", ["Burmese", "English"], index=0)
     
     if uploaded:
-        # ဖိုင်သိမ်းမယ်
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("🚀 Start Magic", use_container_width=True):
@@ -455,33 +454,38 @@ with t1:
             p_bar = st.progress(0, text="Starting...")
 
             # ---------------------------------------------------------
-            # PATH A: TRANSLATION (နဂို မူလ အသံဘာသာပြန်စနစ်)
+            # PATH A: TRANSLATION (Dubbing)
             # ---------------------------------------------------------
             if task_mode == "🗣️ Translate (Dubbing)":
                 p_bar.progress(20, text="🎤 Listening to Audio...")
-                # Audio ထုတ်မယ်
                 subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-                # Whisper နဲ့ နားထောင်မယ်
                 model = load_whisper_safe()
                 if model:
                     lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
                     lang_code = lang_map.get(in_lang, "en")
-                    
                     raw = model.transcribe(FILE_AUDIO_RAW, language=lang_code)['text']
                     st.session_state.raw_transcript = raw
-                    
                     p_bar.progress(50, text="🧠 Translating...")
                     
-                    # Prompt Logic
+                    # 🔥 Dramatic Recap Prompt
                     recap_style_guide = """
                     ROLE: You are a famous Myanmar Movie Recap Narrator.
                     TONE: Dramatic, Flowing, Suspenseful.
+
                     STRICT WRITING RULES:
-                    1. Use dramatic vocabulary (e.g., 'မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်' instead of 'တွေ့တယ်').
-                    2. Connect sentences smoothly using Cause & Effect.
-                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ'.
-                    4. Do not use robotic fillers.
+                    1. **BETTER VOCABULARY:**
+                       - Instead of 'တွေ့လိုက်တယ်', use 'တွေ့လိုက်ရပါတယ်' or 'မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်'.
+                       - Instead of 'ထွက်ပြေးတယ်', use 'ကြောက်လန့်တကြား ထွက်ပြေးသွားခဲ့ပါတယ်'.
+                       - Instead of 'သေသွားတယ်', use 'အသက်ပါ ဆုံးရှုံးလိုက်ရပါတယ်'.
+
+                    2. **CONNECTING SENTENCES:**
+                       - **COMBINE** actions using Cause & Effect (Use 'ဒါကြောင့်', 'ထို့နောက်', 'မထင်မှတ်ဘဲ').
+                       - Example: "သရဲကို တွေ့လိုက်ရတဲ့အတွက် ကြောက်လန့်ပြီး ချက်ချင်းပဲ ထွက်ပြေးသွားပါတော့တယ်".
+
+                    3. **SENTENCE ENDINGS:**
+                       - Use 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ', 'လိုက်ပါတော့သည်'. Mix them up.
+
+                    4. **FORBIDDEN:** Do NOT use 'ပေါ့လေ', 'နော်', 'ဗျ', 'အဲဒီတော့', 'ဗြုန်းကနဲ့'. Use 'ရုတ်တရက်' instead.
                     """
                     
                     if in_lang == out_lang:
@@ -496,28 +500,26 @@ with t1:
                     st.session_state.final_script = generate_with_retry(prompt)
 
             # ---------------------------------------------------------
-            # 🔥 PATH B: AI NARRATION (အသစ်ထည့်လိုက်သော Vision စနစ်)
+            # PATH B: AI NARRATION (Vision)
             # ---------------------------------------------------------
             else:
                 p_bar.progress(20, text="👀 AI is watching video...")
                 try:
-                    # 1. Upload Video to Gemini File API
-                    # API Key ရှိမရှိ စစ်မယ်
                     if not st.session_state.api_keys:
-                        st.error("Please enter Gemini API Key in sidebar first!")
+                        st.error("Please enter Gemini API Key first!")
                         st.stop()
                         
                     genai.configure(api_key=st.session_state.api_keys[0])
                     video_file = genai.upload_file(path=FILE_INPUT)
                     
-                    # 2. Wait for processing (Gemini ဘက်က Video ready ဖြစ်တဲ့ထိ စောင့်)
+                    # Wait for processing
                     while video_file.state.name == "PROCESSING":
                         time.sleep(2)
                         video_file = genai.get_file(video_file.name)
 
-                    # 3. Generate Narration Script
                     p_bar.progress(50, text="✍️ Writing Script...")
                     
+                    # Vision Prompt
                     prompt = f"""
                     ROLE: You are a professional Video Narrator/YouTuber.
                     TASK: Watch this video and write a voiceover script in {out_lang}.
@@ -534,9 +536,7 @@ with t1:
                     model = genai.GenerativeModel(model_name="gemini-1.5-flash")
                     response = model.generate_content([video_file, prompt])
                     st.session_state.final_script = response.text
-                    
-                    # Cleanup Cloud File (အလုပ်ပြီးရင် ဖျက်မယ်)
-                    genai.delete_file(video_file.name)
+                    genai.delete_file(video_file.name) # Cleanup
                     
                 except Exception as e:
                     st.error(f"AI Vision Error: {e}")
@@ -544,15 +544,6 @@ with t1:
 
             p_bar.progress(100, text="✅ Script Ready!")
             st.rerun()
-
-
-
-  
-
-
-
-    
-
         
         txt = st.session_state.final_script if st.session_state.final_script else ""
         word_count = len(txt.split())
@@ -609,6 +600,7 @@ with t1:
             # Step 2: Audio Generation
             p_bar.progress(30, text="🔊 Generating Neural Speech...")
             try:
+                # WORK_DIR ကို parameter အဖြစ်ထည့်ပေးလိုက်ပါသည်
                 success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
                 if not success:
                     st.error(f"❌ Audio Gen Failed: {msg}")
@@ -649,7 +641,8 @@ with t1:
 
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 
-                if result.returncode == 0 and os.path.exists(FILE_FINAL):
+                # 🔥 ERROR FIX: ဖိုင်တကယ်ထွက်မထွက် စစ်ပြီးမှ ပြမယ်
+                if result.returncode == 0 and os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
                     p_bar.progress(100, text="🎉 Video Complete!")
                     st.session_state.processed_video_path = FILE_FINAL
                 else:
