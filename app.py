@@ -533,7 +533,7 @@ with t1:
                     5. Keep it fun and engaging.
                     """
                     
-                    model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+                    model = genai.GenerativeModel(model_name="gemini-2.5-flash")
                     response = model.generate_content([video_file, prompt])
                     st.session_state.final_script = response.text
                     genai.delete_file(video_file.name) # Cleanup
