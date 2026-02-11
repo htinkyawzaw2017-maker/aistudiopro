@@ -454,11 +454,41 @@ with t1:
                 st.session_state.raw_transcript = raw
                 p_bar.progress(60, text="🧠 AI Processing...")
                 
+                                # 🔥 UPDATED: Dramatic Recap Style
+                recap_style_guide = """
+                ROLE: You are a famous Myanmar Movie Recap Narrator.
+                TONE: Dramatic, Flowing, Suspenseful.
+
+                STRICT WRITING RULES:
+                1. **BETTER VOCABULARY:**
+                   - Instead of 'တွေ့လိုက်တယ်', use 'တွေ့လိုက်ရပါတယ်' or 'မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်'.
+                   - Instead of 'ထွက်ပြေးတယ်', use 'ကြောက်လန့်တကြား ထွက်ပြေးသွားခဲ့ပါတယ်'.
+                   - Instead of 'သေသွားတယ်', use 'အသက်ပါ ဆုံးရှုံးလိုက်ရပါတယ်'.
+
+                2. **CONNECTING SENTENCES (IMPORTANT):**
+                   - Do NOT write short, choppy sentences.
+                   - **COMBINE** actions using Cause & Effect.
+                   - Example: "သရဲကို တွေ့လိုက်ရတဲ့အတွက် ကြောက်လန့်ပြီး ချက်ချင်းပဲ ထွက်ပြေးသွားပါတော့တယ်" (Use 'ဒါကြောင့်', 'ထို့နောက်', 'မထင်မှတ်ဘဲ').
+
+                3. **SENTENCE ENDINGS:**
+                   - Use 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ', 'လိုက်ပါတော့တယ်'.
+                   - Mix them up. Do not repeat the same ending.
+
+                4. **FORBIDDEN:** - Do NOT use 'ပေါ့လေ', 'နော်', 'ဗျ', 'သည်','အဲဒီတော့', 'ဗြုန်းကနဲ့'.
+                   - Use 'ရုတ်တရက်' instead of 'ဗြုန်းကနဲ့'.
+                """
+
+                # Logic for Prompt Generation
                 if in_lang == out_lang:
-                    prompt = f"Act as a professional {out_lang} editor. Refine this text for clarity. Do not translate. Input: '{raw}'"
+                    prompt = f"""{recap_style_guide}
+                    TASK: Rewrite the input into a flowing, dramatic Movie Recap script.
+                    Input: '{raw}'"""
                 else:
-                    prompt = f"Translate the following {in_lang} text into {out_lang}. Ensure the tone is natural. Input: '{raw}'"
-                
+                    prompt = f"""{recap_style_guide}
+                    TASK: Translate the {in_lang} text into a flowing, dramatic Burmese Movie Recap script.
+                    Focus on connecting sentences smoothly.
+                    Input: '{raw}'"""
+
                 st.session_state.final_script = generate_with_retry(prompt)
                 p_bar.progress(100, text="✅ Done!")
                 st.rerun()
