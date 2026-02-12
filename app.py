@@ -520,14 +520,19 @@ with t1:
 
         st.markdown("---")
         
-        # 🔥 NEW: Background Music Mixer UI
-        st.markdown("#### 🎵 Background Music (Optional)")
-        bgm_up = st.file_uploader("Upload Music (MP3)", type=["mp3"], key="bgm")
-        if bgm_up:
-            with open(FILE_BGM, "wb") as f: f.write(bgm_up.getbuffer())
-        bgm_vol = st.slider("BGM Volume", 0.0, 0.5, 0.1, 0.05)
-
+# --- REPLACE FROM HERE (Inside Tab 1) ---
         st.markdown("#### ⚙️ Rendering Options")
+        
+        # 1. Freeze Feature UI
+        st.markdown("❄️ **Freeze Frame Effect**")
+        c_fz1, c_fz2 = st.columns(2)
+        with c_fz1:
+            freeze_time = st.number_input("Freeze At (Seconds)", min_value=0, value=0, help="Time to pause the video")
+        with c_fz2:
+            freeze_duration = st.number_input("Freeze Duration (Seconds)", min_value=0, value=0, help="How long to pause (0 to disable)")
+
+        st.divider()
+
         tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
         export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
         
@@ -539,29 +544,73 @@ with t1:
         audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
         video_speed = st.slider("🎞️ Video Speed (Synced)", 0.5, 4.0, 1.0, 0.1)
 
-        # ... (Inside Tab 1) ...
-
         if st.button("🚀 GENERATE FINAL", use_container_width=True):
             p_bar = st.progress(0, text="Generating Audio...")
             if not txt.strip(): st.error("Script empty!"); st.stop()
 
-            # Generate TTS
+            # 1. Generate TTS
             success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
             if not success: st.error(msg); st.stop()
             st.session_state.processed_audio_path = FILE_VOICE
 
-            # 🔥 FIX: Audio Only Logic Added
+            # Audio Only Logic
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Audio Generated Successfully!")
                 time.sleep(0.5)
-                st.rerun() # Refresh to show audio player
+                st.rerun()
 
             elif "Video" in export_format:
-                p_bar.progress(50, text="🎞️ Mixing Video & Audio...")
+                p_bar.progress(20, text="❄️ Processing Video Effects...")
+                
+                # --- NEW: Freeze Frame Logic ---
+                # We will use this 'active_video_input' for the final mix
+                active_video_input = FILE_INPUT 
+
+                if freeze_duration > 0:
+                    try:
+                        # Define temporary paths
+                        part1 = os.path.join(USER_SESSION_DIR, "p1.mp4")
+                        part2 = os.path.join(USER_SESSION_DIR, "p2.mp4")
+                        freeze_img = os.path.join(USER_SESSION_DIR, "freeze.jpg")
+                        freeze_vid = os.path.join(USER_SESSION_DIR, "freeze.mp4")
+                        frozen_full = os.path.join(USER_SESSION_DIR, "frozen_full.mp4")
+                        list_txt = os.path.join(USER_SESSION_DIR, "concat_freeze.txt")
+
+                        # Step A: Split Video (Part 1)
+                        subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-t', str(freeze_time), '-c', 'copy', part1], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # Step B: Capture Frame
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', FILE_INPUT, '-frames:v', '1', '-q:v', '2', freeze_img], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # Step C: Make Frozen Video Loop (Ensuring yuv420p for compatibility)
+                        subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', freeze_img, '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', freeze_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # Step D: Split Video (Part 2 - Rest of video)
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', FILE_INPUT, '-c', 'copy', part2], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                        # Step E: Concat All (Part1 + Freeze + Part2)
+                        with open(list_txt, 'w') as f:
+                            f.write(f"file '{part1}'\nfile '{freeze_vid}'\nfile '{part2}'")
+                        
+                        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_txt, '-c', 'copy', frozen_full], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        if os.path.exists(frozen_full):
+                            active_video_input = frozen_full # Use this modified video for mixing
+                            p_bar.progress(40, text="❄️ Freeze Effect Applied!")
+                    except Exception as e:
+                        st.error(f"Freeze Error: {e}")
+
+                # --- Final Mixing Logic ---
+                p_bar.progress(60, text="🎞️ Mixing Final Video...")
                 pts_val = 1.0 / video_speed
                 
-                inputs = ['-y', '-i', FILE_INPUT, '-i', FILE_VOICE]
-                filter_complex = f"[0:v]setpts={pts_val}*PTS,scale=1920:1080,crop=1920:1080[vzoom]"
+                # Create a unique filename to prevent Browser Caching (Fixes "Video not playing")
+                unique_suffix = int(time.time())
+                FINAL_OUTPUT_NAME = os.path.join(USER_SESSION_DIR, f"final_output_{unique_suffix}.mp4")
+
+                inputs = ['-y', '-i', active_video_input, '-i', FILE_VOICE]
+                # 🔥 FIX: Added format=yuv420p to ensure browser compatibility
+                filter_complex = f"[0:v]setpts={pts_val}*PTS,scale=1920:1080,crop=1920:1080,format=yuv420p[vzoom]"
                 map_cmd = ['-map', '[vzoom]']
                 
                 if os.path.exists(FILE_BGM) and bgm_up:
@@ -571,26 +620,27 @@ with t1:
                 else:
                     map_cmd.extend(['-map', '1:a'])
 
+                # 🔥 FIX: Added -pix_fmt yuv420p explicitly
                 cmd = ['ffmpeg'] + inputs + ['-filter_complex', filter_complex] + map_cmd + \
-                      ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', FILE_FINAL]
+                      ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', FINAL_OUTPUT_NAME]
                 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                if os.path.exists(FILE_FINAL):
-                    st.session_state.processed_video_path = FILE_FINAL
+                if os.path.exists(FINAL_OUTPUT_NAME):
+                    st.session_state.processed_video_path = FINAL_OUTPUT_NAME
                     p_bar.progress(100, text="🎉 Video Complete!")
                     time.sleep(0.5)
-                    st.rerun() # Refresh to show video player
+                    st.rerun()
                 else:
                     st.error("❌ Video Generation Failed")
 
-    # 🔥 FIX: Better Video Display Size (Centered)
     if st.session_state.processed_video_path and "Video" in export_format:
         st.markdown("---")
-        c1, c2, c3 = st.columns([1, 2, 1]) # Use columns to center video
+        c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.success("✨ Final Video Output")
-            st.video(st.session_state.processed_video_path)
+            # Show video with explicit format
+            st.video(st.session_state.processed_video_path, format="video/mp4")
             with open(st.session_state.processed_video_path, "rb") as f: 
                 st.download_button("🎬 Download Video", f, "final_dubbed.mp4", use_container_width=True)
 
