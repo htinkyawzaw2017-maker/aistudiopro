@@ -429,7 +429,16 @@ with st.sidebar:
         except: st.error("❌ Invalid JSON File")
 
     st.divider()
-    st.session_state.selected_model = st.selectbox("Model", ["gemini 2.5 flash tts","gemini-2.5-flash","gemini 2 flash exp","Gemini 2.5 Pro","gemini 2 flash lite"], index=0)
+    st.session_state.selected_model = st.selectbox(
+        "Model", 
+        [
+            "gemini-2.0-flash",           # အမြန်ဆုံးနဲ့ နောက်ဆုံးထွက်
+            "gemini-2.0-flash-lite-preview-02-05", # စမ်းသပ်ဗားရှင်း (ပေါ့ပါးသည်)
+            "gemini-1.5-pro",             # Vision အတွက် အကောင်းဆုံး
+            "gemini-1.5-flash"            # ပုံမှန်သုံးရန်
+        ], 
+        index=0
+    )
 
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
