@@ -431,7 +431,7 @@ def generate_content(prompt, image_input=None):
     
     genai.configure(api_key=api_key)
     # Corrected Model List
-    model_name = st.session_state.get("selected_model", "gemini-1.5-pro")
+    model_name = st.session_state.get("selected_model", "gemini-2.5-flash")
     
     try:
         model = genai.GenerativeModel(model_name)
@@ -519,7 +519,7 @@ with st.sidebar:
     # Model Selection
     st.session_state.selected_model = st.selectbox(
         "AI Model", 
-        ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"], 
+        ["", "", "gemini-2.5-flash"], 
         index=0
     )
 
