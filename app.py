@@ -17,7 +17,7 @@ import requests
 import textwrap
 import math
 import uuid
-import streamlit.components.v1 as components
+import asyncio
 from google.cloud import texttospeech
 from google.oauth2 import service_account
 
@@ -33,59 +33,62 @@ USER_SESSION_DIR = os.path.join(BASE_WORK_DIR, SID)
 os.makedirs(USER_SESSION_DIR, exist_ok=True)
 
 # File Paths
-FILE_INPUT = os.path.join(USER_SESSION_DIR, "input_video.mp4")
-FILE_AUDIO_RAW = os.path.join(USER_SESSION_DIR, "extracted_audio.wav")
-FILE_VOICE = os.path.join(USER_SESSION_DIR, "ai_voice.mp3")
-FILE_VIDEO_FREEZE = os.path.join(USER_SESSION_DIR, "video_frozen.mp4") # For Freeze Effect
-FILE_FINAL = os.path.join(USER_SESSION_DIR, "final_dubbed_video.mp4")
+FILE_INPUT = os.path.join(USER_SESSION_DIR, "input.mp4")
+FILE_AUDIO_RAW = os.path.join(USER_SESSION_DIR, "extracted.wav")
+FILE_VOICE = os.path.join(USER_SESSION_DIR, "voice.mp3")
+FILE_VIDEO_FREEZE = os.path.join(USER_SESSION_DIR, "video_frozen.mp4")
+FILE_FINAL = os.path.join(USER_SESSION_DIR, "final_output.mp4")
+FILE_TEMP_DIR = os.path.join(USER_SESSION_DIR, "temp_chunks")
 
-FILE_CAP_INPUT = os.path.join(USER_SESSION_DIR, "caption_input_video.mp4")
-FILE_CAP_WAV = os.path.join(USER_SESSION_DIR, "caption_audio.wav")
-FILE_CAP_FINAL = os.path.join(USER_SESSION_DIR, "captioned_output.mp4")
-FILE_ASS = os.path.join(USER_SESSION_DIR, "subtitles.ass")
+FILE_CAP_INPUT = os.path.join(USER_SESSION_DIR, "cap_in.mp4")
+FILE_CAP_WAV = os.path.join(USER_SESSION_DIR, "cap_audio.wav")
+FILE_CAP_FINAL = os.path.join(USER_SESSION_DIR, "cap_out.mp4")
+FILE_ASS = os.path.join(USER_SESSION_DIR, "subs.ass")
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP (White Theme, Red Buttons, Mobile Fix)
+# 🎨 UI SETUP (FIXED: Sidebar Button Visible + Neon White)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
-# 🔥 1. KEEP SCREEN AWAKE (JavaScript)
+# Keep Screen Awake
 keep_awake_js = """
 <script>
 async function requestWakeLock() {
   try {
     const wakeLock = await navigator.wakeLock.request('screen');
-    console.log('Wake Lock is active! Screen will not sleep.');
+    console.log('Wake Lock is active!');
   } catch (err) {
-    console.log(`Wake Lock Error: ${err.name}, ${err.message}`);
+    console.log(`${err.name}, ${err.message}`);
   }
 }
 requestWakeLock();
-// Re-request wake lock if visibility changes (e.g. switching tabs)
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible') {
-    requestWakeLock();
-  }
-});
 </script>
 """
-components.html(keep_awake_js, height=0, width=0)
+st.components.v1.html(keep_awake_js, height=0, width=0)
 
-# 🔥 2. CUSTOM CSS (White Background, Red Buttons, Responsive Header)
 st.markdown("""
     <style>
-    /* Force White Background & Black Text */
+    /* 1. Pure White Background & Black Text */
     .stApp {
         background-color: #FFFFFF !important;
         color: #000000 !important;
     }
     
-    /* Hide Default Header */
+    /* 2. HEADER FIX: Keep header visible so Sidebar button shows, but hide decoration */
     header[data-testid="stHeader"] {
+        background-color: #FFFFFF !important;
+        border-bottom: 1px solid #eeeeee;
+        z-index: 999;
+    }
+    div[data-testid="stDecoration"] {
         visibility: hidden;
     }
+    /* Force Sidebar Toggle Button to be Black */
+    button[kind="header"] {
+        color: #000000 !important;
+    }
     
-    /* Sidebar Styling */
+    /* 3. Sidebar Styling */
     [data-testid="stSidebar"] {
         background-color: #F8F9FA;
         border-right: 2px solid #FF0000;
@@ -94,94 +97,77 @@ st.markdown("""
         color: #000000 !important;
     }
     
-    /* 🔴 RED BUTTONS STYLE */
+    /* 4. 🔴 3D RED BUTTONS */
     .stButton > button {
-        background: linear-gradient(45deg, #FF0000, #D90000) !important;
+        background: linear-gradient(145deg, #ff0000, #cc0000) !important;
         color: white !important;
         border: none !important;
-        border-radius: 8px;
+        border-radius: 10px;
+        box-shadow: 0px 5px 0px #990000; /* 3D Bottom Shadow */
         font-weight: bold;
-        box-shadow: 0px 4px 10px rgba(255, 0, 0, 0.3);
-        transition: all 0.3s ease;
+        transition: all 0.1s;
     }
-    .stButton > button:hover {
-        transform: scale(1.02);
-        box-shadow: 0px 6px 15px rgba(255, 0, 0, 0.5);
-    }
-
-    /* Sliders Red */
-    div[data-baseweb="slider"] div {
-        background-color: #FF0000 !important;
+    .stButton > button:active {
+        transform: translateY(4px);
+        box-shadow: 0px 1px 0px #990000;
     }
 
-    /* 📱 RESPONSIVE HEADER FOR MOBILE */
-    .header-container {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 15px;
+    /* 5. NEON LIGHT 3D TEXT */
+    .neon-text {
+        font-family: 'Arial Black', sans-serif;
+        font-size: 3.5rem;
+        text-align: center;
+        color: #fff;
+        text-transform: uppercase;
+        background-color: #111;
         padding: 20px;
-        border-bottom: 2px solid #FF0000;
+        border-radius: 15px;
+        border: 3px solid #FF0000;
+        /* Neon Glow Effect */
+        text-shadow: 
+            0 0 5px #FF0000,
+            0 0 10px #FF0000,
+            0 0 20px #FF0000,
+            0 0 40px #FF0000;
+        box-shadow: 0 0 20px rgba(255, 0, 0, 0.6);
         margin-bottom: 20px;
     }
     
-    .header-icon {
-        width: 80px;
-        height: 80px;
-    }
-    
-    .header-text {
-        font-family: 'Orbitron', sans-serif;
-        color: #FF0000; /* Red Text */
-        font-size: 2.5rem;
-        font-weight: 800;
-        margin: 0;
-        line-height: 1.2;
-    }
-
-    /* Mobile Media Query */
+    /* Mobile Fix */
     @media only screen and (max-width: 600px) {
-        .header-container {
-            flex-direction: column; /* Stack vertically on phone */
-            gap: 10px;
-            padding: 10px;
-        }
-        .header-icon {
-            width: 50px;
-            height: 50px;
-        }
-        .header-text {
-            font-size: 1.8rem; /* Smaller text for mobile */
-            text-align: center;
-        }
+        .neon-text { font-size: 1.8rem; padding: 15px; }
     }
     </style>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
-# Responsive Header HTML
-st.markdown("""
-<div class="header-container">
-    <img src="https://img.icons8.com/color/96/movie-projector.png" class="header-icon"/>
-    <h1 class="header-text">MYANMAR AI STUDIO</h1>
-</div>
-""", unsafe_allow_html=True)
+# 3D Neon Header
+st.markdown('<div class="neon-text">MYANMAR AI STUDIO</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# 💾 STATE MANAGEMENT
+# 💾 STATE
 # ---------------------------------------------------------
-if 'raw_transcript' not in st.session_state: st.session_state.raw_transcript = ""
 if 'final_script' not in st.session_state: st.session_state.final_script = ""
+if 'user_api_key' not in st.session_state: st.session_state.user_api_key = ""
 if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
 if 'processed_audio_path' not in st.session_state: st.session_state.processed_audio_path = None
 if 'caption_video_path' not in st.session_state: st.session_state.caption_video_path = None
 if 'google_creds' not in st.session_state: st.session_state.google_creds = None
-if 'user_api_key' not in st.session_state: st.session_state.user_api_key = ""
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
 # ---------------------------------------------------------
+def check_requirements():
+    if shutil.which("ffmpeg") is None:
+        st.error("❌ FFmpeg is missing.")
+        st.stop()
+
+def get_duration(path):
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return float(json.loads(r.stdout)['format']['duration'])
+    except: return 0.0
+
 def load_custom_dictionary():
     dict_file = "dictionary.txt"
     if os.path.exists(dict_file):
@@ -200,18 +186,6 @@ def load_pronunciation_dict():
                         replacements[parts[0].strip()] = parts[1].strip()
     return replacements
 
-def check_requirements():
-    if shutil.which("ffmpeg") is None:
-        st.error("❌ FFmpeg is missing. Please add 'ffmpeg' to packages.txt")
-        st.stop()
-
-def get_duration(path):
-    try:
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        return float(json.loads(r.stdout)['format']['duration'])
-    except: return 0.0
-
 def download_font():
     font_dir = os.path.abspath("fonts_cache")
     os.makedirs(font_dir, exist_ok=True)
@@ -226,74 +200,66 @@ def download_font():
 
 def load_whisper_safe():
     try: return whisper.load_model("base")
-    except Exception as e: st.error(f"Whisper Error (Try reloading): {e}"); return None
+    except Exception as e: st.error(f"Whisper Error: {e}"); return None
 
 # ---------------------------------------------------------
-# ❄️ FREEZE EFFECT LOGIC (The New Feature)
+# ❄️ FREEZE LOGIC (Robust)
 # ---------------------------------------------------------
 def process_video_with_freeze(input_path, output_path, interval_sec, freeze_duration=3.0):
     """
-    Cuts video into segments of 'interval_sec'.
-    Appends a 'freeze_duration' static clip of the last frame to each segment.
-    Result: Video pauses visually, but output duration increases. 
-    Audio will be replaced by TTS later, so original audio sync doesn't matter here.
+    Splits video at intervals, inserts a 3s freeze frame, creates a longer video.
     """
     if interval_sec <= 0:
         shutil.copy(input_path, output_path)
         return True
 
     try:
+        # Clean temp directory
+        if os.path.exists(FILE_TEMP_DIR): shutil.rmtree(FILE_TEMP_DIR)
+        os.makedirs(FILE_TEMP_DIR, exist_ok=True)
+        
         total_duration = get_duration(input_path)
         current_time = 0.0
         segment_idx = 0
-        
-        # Temp folder for chunks
-        temp_dir = os.path.join(USER_SESSION_DIR, "freeze_chunks")
-        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
-        os.makedirs(temp_dir, exist_ok=True)
-
-        concat_list_path = os.path.join(temp_dir, "concat_freeze.txt")
+        concat_list_path = os.path.join(FILE_TEMP_DIR, "concat.txt")
         
         with open(concat_list_path, "w") as f:
             while current_time < total_duration:
-                # 1. Calculate duration for this segment
+                # 1. Cut Normal Segment
                 duration = min(interval_sec, total_duration - current_time)
-                seg_file = os.path.join(temp_dir, f"seg_{segment_idx}.mp4")
+                seg_file = os.path.join(FILE_TEMP_DIR, f"seg_{segment_idx}.mp4")
                 
-                # Extract segment
-                # -an: Remove audio (since we replace it anyway, and it makes concat easier)
                 subprocess.run([
                     'ffmpeg', '-y', '-ss', str(current_time), '-t', str(duration),
-                    '-i', input_path, '-an', '-c:v', 'libx264', '-preset', 'ultrafast', seg_file
+                    '-i', input_path, '-c:v', 'libx264', '-c:a', 'aac', seg_file
                 ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 f.write(f"file '{seg_file}'\n")
                 
-                # 2. Create Freeze Frame (if we are not at the absolute end, or user wants it)
-                # Logic: We freeze AFTER each interval.
-                if current_time + duration <= total_duration:
-                    freeze_file = os.path.join(temp_dir, f"freeze_{segment_idx}.mp4")
-                    last_frame_img = os.path.join(temp_dir, f"frame_{segment_idx}.jpg")
+                # 2. Add Freeze Frame (if not end)
+                if current_time + duration < total_duration:
+                    freeze_file = os.path.join(FILE_TEMP_DIR, f"freeze_{segment_idx}.mp4")
                     
                     # Extract last frame
                     subprocess.run([
                         'ffmpeg', '-y', '-sseof', '-0.1', '-i', seg_file,
-                        '-update', '1', '-q:v', '2', last_frame_img
+                        '-update', '1', '-q:v', '2', os.path.join(FILE_TEMP_DIR, "last.jpg")
                     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
-                    # Create static video from image
+                    # Make freeze video (Silent)
                     subprocess.run([
-                        'ffmpeg', '-y', '-loop', '1', '-i', last_frame_img,
-                        '-t', str(freeze_duration), '-c:v', 'libx264', '-preset', 'ultrafast',
+                        'ffmpeg', '-y', '-loop', '1', '-i', os.path.join(FILE_TEMP_DIR, "last.jpg"),
+                        '-f', 'lavfi', '-i', 'anullsrc', 
+                        '-t', str(freeze_duration), '-c:v', 'libx264', '-c:a', 'aac', 
                         '-pix_fmt', 'yuv420p', freeze_file
                     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
                     f.write(f"file '{freeze_file}'\n")
-                
+
                 current_time += duration
                 segment_idx += 1
 
-        # 3. Concatenate all segments
+        # 3. Concatenate
         subprocess.run([
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list_path,
             '-c', 'copy', output_path
@@ -301,7 +267,7 @@ def process_video_with_freeze(input_path, output_path, interval_sec, freeze_dura
         
         return True
     except Exception as e:
-        print(f"Freeze Error: {e}")
+        st.error(f"Freeze Error: {e}")
         return False
 
 # ---------------------------------------------------------
@@ -352,6 +318,44 @@ def generate_google_chunk(text, lang, gender, rate_val, pitch_val, output_file, 
         with open(output_file, "wb") as out: out.write(response.audio_content)
         return True
     except Exception as e: print(f"Google TTS Error: {e}"); return False
+
+def num_to_burmese_spoken(num_str):
+    try:
+        num_str = num_str.replace(",", "")
+        n = int(num_str)
+        if n == 0: return "သုည"
+        digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
+        def convert_chunk(number):
+            parts = []
+            if number >= 10000000: parts.append(convert_chunk(number // 10000000) + "ကုဋေ"); number %= 10000000
+            if number >= 1000000: parts.append(digit_map[number // 1000000] + "သန်း"); number %= 1000000
+            if number >= 100000: parts.append(digit_map[number // 100000] + "သိန်း"); number %= 100000
+            if number >= 10000: parts.append(digit_map[number // 10000] + "သောင်း"); number %= 10000
+            if number >= 1000: parts.append(digit_map[number // 1000] + "ထောင်"); number %= 1000
+            if number >= 100: parts.append(digit_map[number // 100] + "ရာ"); number %= 100
+            if number >= 10: parts.append(digit_map[number // 10] + "ဆယ်"); number %= 10
+            if number > 0: parts.append(digit_map[number])
+            return "".join(parts)
+        result = convert_chunk(n)
+        result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
+        if result.endswith("ထောင့်"): result = result[:-1] + "င်"
+        if result.endswith("ရာ့"): result = result[:-1]
+        if result.endswith("ဆယ့်"): result = result[:-1]
+        return result
+    except: return num_str
+
+def normalize_text_for_tts(text):
+    if not text: return ""
+    text = re.sub(r'(?<=\d),(?=\d)', '', text)
+    text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
+    pron_dict = load_pronunciation_dict()
+    sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
+    for original in sorted_keys:
+        text = re.compile(re.escape(original), re.IGNORECASE).sub(pron_dict[original], text)
+    text = text.replace("၊", ", ").replace("။", ". ").replace("[p]", "... ") 
+    text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
 def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file, engine="Edge TTS", base_speed=1.0):
     base_settings = VOICE_MODES.get(base_mode, VOICE_MODES["Normal"])
@@ -418,68 +422,29 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         return True, "Success"
     except Exception as e: return False, str(e)
 
-def num_to_burmese_spoken(num_str):
-    try:
-        num_str = num_str.replace(",", "")
-        n = int(num_str)
-        if n == 0: return "သုည"
-        digit_map = ["", "တစ်", "နှစ်", "သုံး", "လေး", "ငါး", "ခြောက်", "ခုနစ်", "ရှစ်", "ကိုး"]
-        def convert_chunk(number):
-            parts = []
-            if number >= 10000000: parts.append(convert_chunk(number // 10000000) + "ကုဋေ"); number %= 10000000
-            if number >= 1000000: parts.append(digit_map[number // 1000000] + "သန်း"); number %= 1000000
-            if number >= 100000: parts.append(digit_map[number // 100000] + "သိန်း"); number %= 100000
-            if number >= 10000: parts.append(digit_map[number // 10000] + "သောင်း"); number %= 10000
-            if number >= 1000: parts.append(digit_map[number // 1000] + "ထောင်"); number %= 1000
-            if number >= 100: parts.append(digit_map[number // 100] + "ရာ"); number %= 100
-            if number >= 10: parts.append(digit_map[number // 10] + "ဆယ်"); number %= 10
-            if number > 0: parts.append(digit_map[number])
-            return "".join(parts)
-        result = convert_chunk(n)
-        result = result.replace("ထောင်", "ထောင့်").replace("ရာ", "ရာ့").replace("ဆယ်", "ဆယ့်")
-        if result.endswith("ထောင့်"): result = result[:-1] + "င်"
-        if result.endswith("ရာ့"): result = result[:-1]
-        if result.endswith("ဆယ့်"): result = result[:-1]
-        return result
-    except: return num_str
-
-def normalize_text_for_tts(text):
-    if not text: return ""
-    text = re.sub(r'(?<=\d),(?=\d)', '', text)
-    text = text.replace("*", "").replace("#", "").replace("- ", "").replace('"', "").replace("'", "")
-    pron_dict = load_pronunciation_dict()
-    sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
-    for original in sorted_keys:
-        text = re.compile(re.escape(original), re.IGNORECASE).sub(pron_dict[original], text)
-    text = text.replace("၊", ", ").replace("။", ". ").replace("[p]", "... ") 
-    text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
-
 # ---------------------------------------------------------
-# 🧠 AI ENGINE
+# 🧠 AI ENGINE (VISION & TEXT)
 # ---------------------------------------------------------
 def generate_content(prompt, image_input=None):
     api_key = st.session_state.user_api_key
-    if not api_key:
-        return "❌ Please enter your Gemini API Key in the sidebar first."
+    if not api_key: return "⚠️ Error: API Key Missing"
     
     genai.configure(api_key=api_key)
-    # Corrected Model List: Using official names
+    # Corrected Model List
     model_name = st.session_state.get("selected_model", "gemini-1.5-pro")
     
     try:
         model = genai.GenerativeModel(model_name)
         custom_rules = load_custom_dictionary()
         full_prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}" if custom_rules else prompt
-        
+
         if image_input:
+            # 🔥 AI VISION LOGIC
             response = model.generate_content([image_input, full_prompt])
         else:
             response = model.generate_content(full_prompt)
         return response.text
-    except Exception as e:
-        return f"AI Error: {str(e)}"
+    except Exception as e: return f"AI Error: {str(e)}"
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE
@@ -511,38 +476,36 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_path
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI & SIDEBAR
+# 🖥️ SIDEBAR (NOW VISIBLE)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ SETTINGS")
     
     # API KEY INPUT
     st.markdown("### 🔑 API Key")
-    user_key = st.text_input("Paste Gemini API Key:", type="password", help="Get a free key from Google AI Studio.")
-    
+    user_key = st.text_input("Paste Gemini API Key", type="password", help="Visible now!")
     if user_key:
         st.session_state.user_api_key = user_key.strip()
-        st.success("✅ Connected")
+        st.success("✅ Key Active")
     else:
-        st.error("⚠️ Key Required")
+        st.warning("⚠️ Key Missing")
 
     st.divider()
-
-    # 🔥 FREEZE SETTINGS (New Feature)
-    st.markdown("### ❄️ Freeze Effect")
+    
+    # FREEZE SETTINGS
+    st.markdown("### ❄️ FREEZE EFFECT")
     freeze_option = st.selectbox(
-        "Interval (Video stops, Audio continues)", 
-        ["No Freeze", "Every 30 Seconds", "Every 1 Minute", "Every 2 Minutes"]
+        "Freeze Interval (3s Pause)", 
+        ["None", "Every 30 Seconds", "Every 1 Minute", "Every 2 Minutes"]
     )
     
-    # Map selection to seconds
     freeze_interval = 0
     if freeze_option == "Every 30 Seconds": freeze_interval = 30
     elif freeze_option == "Every 1 Minute": freeze_interval = 60
     elif freeze_option == "Every 2 Minutes": freeze_interval = 120
-
+    
     st.divider()
-
+    
     st.markdown("☁️ **Google Cloud TTS:**")
     gcp_file = st.file_uploader("Upload service_account.json", type=["json"])
     if gcp_file:
@@ -553,189 +516,104 @@ with st.sidebar:
         except: st.error("❌ Invalid JSON")
 
     st.divider()
-    # Corrected Model List
+    # Model Selection
     st.session_state.selected_model = st.selectbox(
         "AI Model", 
         ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"], 
         index=0
     )
 
-    with st.expander("🚨 Danger Zone", expanded=False):
-        if st.button("🗑️ Clear My Data"):
-            try:
-                if os.path.exists(USER_SESSION_DIR):
-                    shutil.rmtree(USER_SESSION_DIR)
-                    os.makedirs(USER_SESSION_DIR, exist_ok=True)
-                    st.success("Data cleared!")
-                    time.sleep(1)
-                    st.rerun()
-            except Exception as e: st.error(str(e))
-
-    if st.button("🔴 Reset System", use_container_width=True):
-        for key in st.session_state.keys(): del st.session_state[key]
+    if st.button("🗑️ Clear Cache"):
+        if os.path.exists(USER_SESSION_DIR): shutil.rmtree(USER_SESSION_DIR)
         st.rerun()
 
-# ⚠️ STOP IF NO KEY
+# ---------------------------------------------------------
+# 🎞️ MAIN APP
+# ---------------------------------------------------------
 if not st.session_state.user_api_key:
-    st.warning("👋 Welcome! Please enter your Gemini API Key in the Sidebar to start.")
+    st.info("👈 Please enter API Key in sidebar (Slider Button is now visible at top left).")
     st.stop()
 
-t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
+t1, t2, t3 = st.tabs(["🎬 STUDIO", "📝 CAPTION", "🚀 VIRAL SEO"])
 
-# === TAB 1: DUBBING STUDIO ===
 with t1:
-    col_up, col_set = st.columns([2, 1])
-    with col_up:
-        uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
-    with col_set:
-        task_mode = st.radio("Mode", ["🗣️ Translate (Dubbing)", "👀 AI Narration (Silent Video)"])
-        
-        if task_mode == "🗣️ Translate (Dubbing)":
-            in_lang = st.selectbox("Input Language", ["English", "Burmese", "Japanese", "Chinese", "Thai"])
-        else:
-            vibe = st.selectbox("Narration Style", ["Vlog/Casual", "Tutorial/Explainer", "Relaxing/ASMR", "Exciting/Unboxing"])
-            
-        out_lang = st.selectbox("Output Language", ["Burmese", "English"], index=0)
-    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        uploaded = st.file_uploader("Upload Video", type=['mp4', 'mov'])
+    with col2:
+        mode = st.radio("Mode", ["🗣️ Translate", "👀 Narration"])
+        out_lang = st.selectbox("Output Language", ["Burmese", "English"])
+
     if uploaded:
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
-        if st.button("🚀 Start Magic", use_container_width=True):
+        if st.button("🚀 START PROCESS", use_container_width=True):
+            p_bar = st.progress(0, "Initializing...")
             check_requirements()
-            p_bar = st.progress(0, text="Starting...")
-
-            # PATH A: TRANSLATION
-            if task_mode == "🗣️ Translate (Dubbing)":
-                p_bar.progress(20, text="🎤 Listening to Audio...")
+            
+            # 1. SCRIPT
+            if mode == "🗣️ Translate":
+                p_bar.progress(20, "🎧 Extracting Audio...")
                 subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 model = load_whisper_safe()
                 if model:
-                    lang_map = {"Burmese": "my", "English": "en", "Japanese": "ja", "Chinese": "zh", "Thai": "th"}
-                    lang_code = lang_map.get(in_lang, "en")
-                    raw = model.transcribe(FILE_AUDIO_RAW, language=lang_code)['text']
-                    st.session_state.raw_transcript = raw
-                    p_bar.progress(50, text="🧠 Translating...")
-                    
-                    recap_style_guide = """
-                    ROLE: You are a famous Myanmar Movie Recap Narrator.
-                    TONE: Dramatic, Flowing, Suspenseful.
-                    STRICT WRITING RULES:
-                    1. Use dramatic vocabulary ('မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်').
-                    2. Connect sentences smoothly using Cause & Effect.
-                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ'.
-                    4. Do not use robotic fillers.
-                    """
-                    
-                    if in_lang == out_lang:
-                        prompt = f"""{recap_style_guide}\nTASK: Rewrite into flowing Recap script.\nInput: '{raw}'"""
-                    else:
-                        prompt = f"""{recap_style_guide}\nTASK: Translate to Burmese Recap script.\nInput: '{raw}'"""
-                    
+                    raw_text = model.transcribe(FILE_AUDIO_RAW)['text']
+                    prompt = f"Rewrite as dramatic {out_lang} recap: '{raw_text}'"
                     st.session_state.final_script = generate_content(prompt)
-
-            # PATH B: AI NARRATION (VISION)
             else:
-                p_bar.progress(20, text="👀 AI is watching video...")
-                try:
-                    genai.configure(api_key=st.session_state.user_api_key)
-                    video_file = genai.upload_file(path=FILE_INPUT)
-                    
-                    while video_file.state.name == "PROCESSING":
-                        time.sleep(2)
-                        video_file = genai.get_file(video_file.name)
-
-                    p_bar.progress(50, text="✍️ Writing Script...")
-                    prompt = f"""
-                    ROLE: Professional Video Narrator.
-                    TASK: Write a voiceover script in {out_lang}.
-                    STYLE: {vibe}.
-                    RULES: Describe actions naturally. Match video pacing. Use engaging language.
-                    """
-                    st.session_state.final_script = generate_content(prompt, image_input=video_file)
-                    genai.delete_file(video_file.name)
-                except Exception as e:
-                    st.error(f"AI Vision Error: {e}")
-                    st.stop()
-
-            p_bar.progress(100, text="✅ Script Ready!")
-            st.rerun()
-        
-        txt = st.text_area("Final Script", st.session_state.final_script, height=200)
-
-        st.markdown("---")
-        st.markdown("#### ⚙️ Rendering Options")
-        
-        tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
-        c_fmt, c_spd = st.columns([1, 1.2]) 
-        with c_fmt: export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
-        with c_spd:
-            audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
-            video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
-
-        c_v1, c_v2, c_v3 = st.columns(3)
-        with c_v1: target_lang = st.selectbox("Voice Lang", list(VOICE_MAP.keys()), index=0 if out_lang == "Burmese" else 1)
-        with c_v2: gender = st.selectbox("Gender", ["Male", "Female"])
-        with c_v3: v_mode = st.selectbox("Voice Mode", list(VOICE_MODES.keys()))
-        
-        zoom_val = st.slider("🔍 Copyright Zoom (Video Only)", 1.0, 1.2, 1.0, 0.01)
-
-        btn_label = "🚀 GENERATE AUDIO" if "Audio" in export_format else "🚀 RENDER FINAL VIDEO"
-        
-        if st.button(btn_label, use_container_width=True):
-            p_bar = st.progress(0, text="🚀 Initializing...")
+                p_bar.progress(20, "👀 Watching Video...")
+                genai.configure(api_key=st.session_state.user_api_key)
+                video_file = genai.upload_file(path=FILE_INPUT)
+                while video_file.state.name == "PROCESSING": time.sleep(2); video_file = genai.get_file(video_file.name)
+                
+                prompt = f"Write a dramatic {out_lang} narration script for this video."
+                st.session_state.final_script = generate_content(prompt, image_input=video_file)
             
-            if not txt.strip(): st.error("❌ Script is empty!"); st.stop()
-
-            p_bar.progress(30, text="🔊 Generating Speech...")
-            try:
-                success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
-                if not success: st.error(f"❌ Audio Failed: {msg}"); st.stop()
-                st.session_state.processed_audio_path = FILE_VOICE
-            except Exception as e: st.error(f"Audio Error: {e}"); st.stop()
+            # 2. AUDIO
+            p_bar.progress(60, "🔊 Generating Voice...")
+            gender = "Male"
+            v_mode = "Recap"
+            tts_engine = "Edge TTS" 
             
-            if "Audio" in export_format:
-                p_bar.progress(100, text="✅ Done!")
+            success, msg = generate_audio_with_emotions(
+                st.session_state.final_script, 
+                out_lang, 
+                gender, 
+                v_mode, 
+                FILE_VOICE, 
+                engine=tts_engine
+            )
+            
+            if not success:
+                st.error(f"Audio Failed: {msg}")
+                st.stop()
+
+            # 3. VIDEO PROCESSING (FREEZE)
+            p_bar.progress(80, "🎞️ Processing Video...")
+            video_source = FILE_INPUT
+            
+            if freeze_interval > 0:
+                success = process_video_with_freeze(FILE_INPUT, FILE_VIDEO_FREEZE, freeze_interval, freeze_duration=3.0)
+                if success: video_source = FILE_VIDEO_FREEZE
+
+            # 4. MERGE
+            cmd = ['ffmpeg', '-y', '-i', video_source, '-i', FILE_VOICE, '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', FILE_FINAL]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            if os.path.exists(FILE_FINAL):
+                st.session_state.processed_video_path = FILE_FINAL
+                p_bar.progress(100, "🎉 DONE!")
             else:
-                p_bar.progress(50, text="🎞️ Rendering Video (Applying Effects)...")
-                
-                # ❄️ APPLY FREEZE EFFECT IF SELECTED
-                video_source = FILE_INPUT
-                if freeze_interval > 0:
-                    st.toast(f"❄️ Freezing video every {freeze_option}...")
-                    freeze_success = process_video_with_freeze(FILE_INPUT, FILE_VIDEO_FREEZE, freeze_interval, freeze_duration=3.0)
-                    if freeze_success:
-                        video_source = FILE_VIDEO_FREEZE
-                    else:
-                        st.warning("Freeze effect failed, using original video.")
+                st.error("Render Failed")
 
-                pts_val = 1.0 / video_speed
-                w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
-                if w_s % 2 != 0: w_s += 1
-                if h_s % 2 != 0: h_s += 1
-                
-                aud_dur = get_duration(FILE_VOICE)
-                vid_dur = get_duration(video_source) / video_speed
-                
-                # Logic: If audio is longer, loop video or freeze last frame.
-                # Here we use -stream_loop -1 and -shortest to ensure video matches audio length
-                cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', video_source, '-i', FILE_VOICE, 
-                       '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
-                       '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
-                       '-shortest', FILE_FINAL]
-
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
-                    st.session_state.processed_video_path = FILE_FINAL
-                    p_bar.progress(100, text="🎉 Done!")
-                else: st.error("❌ Video Generation Failed")
-
-    if st.session_state.processed_video_path and "Video" in export_format:
+    # RESULT
+    if st.session_state.final_script:
+        st.text_area("Script", st.session_state.final_script)
+        
+    if st.session_state.processed_video_path:
         st.video(st.session_state.processed_video_path)
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
-
-    if st.session_state.processed_audio_path:
-        st.audio(st.session_state.processed_audio_path)
-        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
+        with open(st.session_state.processed_video_path, "rb") as f:
+            st.download_button("📥 Download Video", f, "output.mp4", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
