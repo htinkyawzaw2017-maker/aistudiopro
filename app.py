@@ -436,8 +436,8 @@ with st.sidebar:
             "gemini-2.0-flash-lite-preview-02-05", # စမ်းသပ်ဗားရှင်း (ပေါ့ပါးသည်)
             "gemini-1.5-pro",             # Vision အတွက် အကောင်းဆုံး
             "gemini-1.5-flash",
-            "Gemini-2.5-Flash",
-            "Gemini-2-Pro-Exp"
+            "gemini-2.5-flash",
+            "gemini-2-pro-exp"
             # ပုံမှန်သုံးရန်
         ], 
         index=0
