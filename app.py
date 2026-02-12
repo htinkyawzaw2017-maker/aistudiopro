@@ -429,7 +429,7 @@ with st.sidebar:
         except: st.error("❌ Invalid JSON File")
 
     st.divider()
-    st.session_state.selected_model = st.selectbox("Model", ["gemini 2.5 flash tts", "gemini-2.5-flash","gemini 2 flash exp","gemini 2.5 pro","gemini 2 flash lite"], index=0)
+    st.session_state.selected_model = st.selectbox("Model", ["gemini 2.5 flash tts","gemini-2.5-flash","gemini 2 flash exp","Gemini 2.5 Pro","gemini 2 flash lite"], index=0)
 
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
