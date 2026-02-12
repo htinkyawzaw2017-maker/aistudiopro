@@ -431,22 +431,27 @@ with st.sidebar:
 
     st.divider()
 
-    with st.session_state.api_keys:
-        try:
-            if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
-            else: default_keys = ""
-        except: default_keys = ""
-        api_key_input = st.text_input("Gemini API Keys", value=default_keys, type="password")
+    # --- START NEW CODE ---
+    with st.expander("🔑 API Keys & Model", expanded=True):
+        # User ကို Key မဖြစ်မနေ ထည့်ခိုင်းမယ် (System Key မသုံးတော့ပါ)
+        api_key_input = st.text_input("Gemini API Key (Required)", value="", type="password", help="Enter your own Google AI Studio API Key.")
+        
         if api_key_input:
             st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        st.session_state.selected_model = st.selectbox("Model", ["gemini-1.5-pro", "gemini-2.5-flash"], index=0)
+        else:
+            st.session_state.api_keys = []
+        
+        st.session_state.selected_model = st.selectbox("Model", [ "gemini-2.5-flash","gemini-1.5-pro"], index=0)
 
     if st.button("🔴 Reset System", use_container_width=True):
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
-if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys in Sidebar"); st.stop()
-
+# Key မရှိရင် App ကို ရှေ့ဆက်မသွားအောင် တားထားမယ်
+if not st.session_state.api_keys: 
+    st.warning("⚠️ Enter Gemini API Keys in Sidebar to continue")
+    st.stop()
+    # --- END NEW CODE ---
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
 # === TAB 1: DUBBING STUDIO ===
