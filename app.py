@@ -17,6 +17,7 @@ import requests
 import textwrap
 import math
 import uuid
+import streamlit.components.v1 as components
 from google.cloud import texttospeech
 from google.oauth2 import service_account
 
@@ -31,50 +32,86 @@ BASE_WORK_DIR = os.path.abspath("user_sessions")
 USER_SESSION_DIR = os.path.join(BASE_WORK_DIR, SID)
 os.makedirs(USER_SESSION_DIR, exist_ok=True)
 
+# File Paths
 FILE_INPUT = os.path.join(USER_SESSION_DIR, "input_video.mp4")
 FILE_AUDIO_RAW = os.path.join(USER_SESSION_DIR, "extracted_audio.wav")
 FILE_VOICE = os.path.join(USER_SESSION_DIR, "ai_voice.mp3")
+FILE_VIDEO_FREEZE = os.path.join(USER_SESSION_DIR, "video_frozen.mp4") # For Freeze Effect
 FILE_FINAL = os.path.join(USER_SESSION_DIR, "final_dubbed_video.mp4")
+
 FILE_CAP_INPUT = os.path.join(USER_SESSION_DIR, "caption_input_video.mp4")
 FILE_CAP_WAV = os.path.join(USER_SESSION_DIR, "caption_audio.wav")
 FILE_CAP_FINAL = os.path.join(USER_SESSION_DIR, "captioned_output.mp4")
 FILE_ASS = os.path.join(USER_SESSION_DIR, "subtitles.ass")
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP (Responsive Header & Red Buttons)
+# 🎨 UI SETUP (White Theme, Red Buttons, Mobile Fix)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
+# 🔥 1. KEEP SCREEN AWAKE (JavaScript)
+keep_awake_js = """
+<script>
+async function requestWakeLock() {
+  try {
+    const wakeLock = await navigator.wakeLock.request('screen');
+    console.log('Wake Lock is active! Screen will not sleep.');
+  } catch (err) {
+    console.log(`Wake Lock Error: ${err.name}, ${err.message}`);
+  }
+}
+requestWakeLock();
+// Re-request wake lock if visibility changes (e.g. switching tabs)
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible') {
+    requestWakeLock();
+  }
+});
+</script>
+"""
+components.html(keep_awake_js, height=0, width=0)
+
+# 🔥 2. CUSTOM CSS (White Background, Red Buttons, Responsive Header)
 st.markdown("""
     <style>
-    /* Global Background */
+    /* Force White Background & Black Text */
     .stApp {
-        background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
-        background-attachment: fixed;
-        background-size: cover;
-        background-position: center;
-        color: #e0e0e0;
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+    }
+    
+    /* Hide Default Header */
+    header[data-testid="stHeader"] {
+        visibility: hidden;
     }
     
     /* Sidebar Styling */
     [data-testid="stSidebar"] {
-        background-color: rgba(10, 25, 47, 0.95);
-        border-right: 1px solid #FF0000;
+        background-color: #F8F9FA;
+        border-right: 2px solid #FF0000;
+    }
+    [data-testid="stSidebar"] * {
+        color: #000000 !important;
     }
     
-    /* 🔴 RED BUTTONS STYLE (Bright Red as requested) */
+    /* 🔴 RED BUTTONS STYLE */
     .stButton > button {
-        background: linear-gradient(45deg, #FF0000, #B30000) !important;
+        background: linear-gradient(45deg, #FF0000, #D90000) !important;
         color: white !important;
-        border: 2px solid #FF4444 !important;
+        border: none !important;
         border-radius: 8px;
         font-weight: bold;
-        box-shadow: 0px 4px 15px rgba(255, 0, 0, 0.4);
+        box-shadow: 0px 4px 10px rgba(255, 0, 0, 0.3);
         transition: all 0.3s ease;
     }
     .stButton > button:hover {
-        transform: scale(1.05);
-        box-shadow: 0px 6px 20px rgba(255, 0, 0, 0.7);
+        transform: scale(1.02);
+        box-shadow: 0px 6px 15px rgba(255, 0, 0, 0.5);
+    }
+
+    /* Sliders Red */
+    div[data-baseweb="slider"] div {
+        background-color: #FF0000 !important;
     }
 
     /* 📱 RESPONSIVE HEADER FOR MOBILE */
@@ -85,8 +122,7 @@ st.markdown("""
         justify-content: center;
         gap: 15px;
         padding: 20px;
-        background: rgba(0,0,0,0.4);
-        border-radius: 15px;
+        border-bottom: 2px solid #FF0000;
         margin-bottom: 20px;
     }
     
@@ -97,12 +133,9 @@ st.markdown("""
     
     .header-text {
         font-family: 'Orbitron', sans-serif;
-        background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 3rem;
+        color: #FF0000; /* Red Text */
+        font-size: 2.5rem;
         font-weight: 800;
-        text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
         margin: 0;
         line-height: 1.2;
     }
@@ -130,8 +163,8 @@ st.markdown("""
 # Responsive Header HTML
 st.markdown("""
 <div class="header-container">
-    <img src="https://img.icons8.com/nolan/96/movie-projector.png" class="header-icon"/>
-    <h1 class="header-text">MYANMAR AI STUDIO PRO</h1>
+    <img src="https://img.icons8.com/color/96/movie-projector.png" class="header-icon"/>
+    <h1 class="header-text">MYANMAR AI STUDIO</h1>
 </div>
 """, unsafe_allow_html=True)
 
@@ -194,6 +227,82 @@ def download_font():
 def load_whisper_safe():
     try: return whisper.load_model("base")
     except Exception as e: st.error(f"Whisper Error (Try reloading): {e}"); return None
+
+# ---------------------------------------------------------
+# ❄️ FREEZE EFFECT LOGIC (The New Feature)
+# ---------------------------------------------------------
+def process_video_with_freeze(input_path, output_path, interval_sec, freeze_duration=3.0):
+    """
+    Cuts video into segments of 'interval_sec'.
+    Appends a 'freeze_duration' static clip of the last frame to each segment.
+    Result: Video pauses visually, but output duration increases. 
+    Audio will be replaced by TTS later, so original audio sync doesn't matter here.
+    """
+    if interval_sec <= 0:
+        shutil.copy(input_path, output_path)
+        return True
+
+    try:
+        total_duration = get_duration(input_path)
+        current_time = 0.0
+        segment_idx = 0
+        
+        # Temp folder for chunks
+        temp_dir = os.path.join(USER_SESSION_DIR, "freeze_chunks")
+        if os.path.exists(temp_dir): shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir, exist_ok=True)
+
+        concat_list_path = os.path.join(temp_dir, "concat_freeze.txt")
+        
+        with open(concat_list_path, "w") as f:
+            while current_time < total_duration:
+                # 1. Calculate duration for this segment
+                duration = min(interval_sec, total_duration - current_time)
+                seg_file = os.path.join(temp_dir, f"seg_{segment_idx}.mp4")
+                
+                # Extract segment
+                # -an: Remove audio (since we replace it anyway, and it makes concat easier)
+                subprocess.run([
+                    'ffmpeg', '-y', '-ss', str(current_time), '-t', str(duration),
+                    '-i', input_path, '-an', '-c:v', 'libx264', '-preset', 'ultrafast', seg_file
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                f.write(f"file '{seg_file}'\n")
+                
+                # 2. Create Freeze Frame (if we are not at the absolute end, or user wants it)
+                # Logic: We freeze AFTER each interval.
+                if current_time + duration <= total_duration:
+                    freeze_file = os.path.join(temp_dir, f"freeze_{segment_idx}.mp4")
+                    last_frame_img = os.path.join(temp_dir, f"frame_{segment_idx}.jpg")
+                    
+                    # Extract last frame
+                    subprocess.run([
+                        'ffmpeg', '-y', '-sseof', '-0.1', '-i', seg_file,
+                        '-update', '1', '-q:v', '2', last_frame_img
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    # Create static video from image
+                    subprocess.run([
+                        'ffmpeg', '-y', '-loop', '1', '-i', last_frame_img,
+                        '-t', str(freeze_duration), '-c:v', 'libx264', '-preset', 'ultrafast',
+                        '-pix_fmt', 'yuv420p', freeze_file
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                    f.write(f"file '{freeze_file}'\n")
+                
+                current_time += duration
+                segment_idx += 1
+
+        # 3. Concatenate all segments
+        subprocess.run([
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list_path,
+            '-c', 'copy', output_path
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        return True
+    except Exception as e:
+        print(f"Freeze Error: {e}")
+        return False
 
 # ---------------------------------------------------------
 # 🔊 AUDIO ENGINE
@@ -348,15 +457,15 @@ def normalize_text_for_tts(text):
     return text
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (API KEY FIX)
+# 🧠 AI ENGINE
 # ---------------------------------------------------------
-# New Logic: Directly use the user-provided key. No secrets loop.
 def generate_content(prompt, image_input=None):
     api_key = st.session_state.user_api_key
     if not api_key:
         return "❌ Please enter your Gemini API Key in the sidebar first."
     
     genai.configure(api_key=api_key)
+    # Corrected Model List: Using official names
     model_name = st.session_state.get("selected_model", "gemini-1.5-pro")
     
     try:
@@ -402,44 +511,52 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_path
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI & SIDEBAR (User Input API Key)
+# 🖥️ MAIN UI & SIDEBAR
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("⚙️ Control Panel")
+    st.header("⚙️ SETTINGS")
     
-    # 🔥 API KEY INPUT (MANDATORY & RED BORDER)
-    st.markdown("### 🔑 Enter Your Gemini API Key")
-    user_key = st.text_input("Paste your Key here:", type="password", help="Get a free key from Google AI Studio.")
+    # API KEY INPUT
+    st.markdown("### 🔑 API Key")
+    user_key = st.text_input("Paste Gemini API Key:", type="password", help="Get a free key from Google AI Studio.")
     
     if user_key:
         st.session_state.user_api_key = user_key.strip()
-        st.success("✅ Key Saved!")
+        st.success("✅ Connected")
     else:
-        st.error("⚠️ API Key Required!")
+        st.error("⚠️ Key Required")
 
     st.divider()
 
-    st.markdown("☁️ **Google Cloud TTS (Optional):**")
+    # 🔥 FREEZE SETTINGS (New Feature)
+    st.markdown("### ❄️ Freeze Effect")
+    freeze_option = st.selectbox(
+        "Interval (Video stops, Audio continues)", 
+        ["No Freeze", "Every 30 Seconds", "Every 1 Minute", "Every 2 Minutes"]
+    )
+    
+    # Map selection to seconds
+    freeze_interval = 0
+    if freeze_option == "Every 30 Seconds": freeze_interval = 30
+    elif freeze_option == "Every 1 Minute": freeze_interval = 60
+    elif freeze_option == "Every 2 Minutes": freeze_interval = 120
+
+    st.divider()
+
+    st.markdown("☁️ **Google Cloud TTS:**")
     gcp_file = st.file_uploader("Upload service_account.json", type=["json"])
     if gcp_file:
         try:
             gcp_data = json.load(gcp_file)
             st.session_state.google_creds = service_account.Credentials.from_service_account_info(gcp_data)
-            st.success("✅ GCP Key Loaded!")
-        except: st.error("❌ Invalid JSON File")
+            st.success("✅ GCP Active")
+        except: st.error("❌ Invalid JSON")
 
     st.divider()
+    # Corrected Model List
     st.session_state.selected_model = st.selectbox(
-        "Model", 
-        [
-            "gemini-2.0-flash",           # အမြန်ဆုံးနဲ့ နောက်ဆုံးထွက်
-            "gemini-2.0-flash-lite-preview-02-05", # စမ်းသပ်ဗားရှင်း (ပေါ့ပါးသည်)
-            "gemini-1.5-pro",             # Vision အတွက် အကောင်းဆုံး
-            "gemini-1.5-flash",
-            "gemini-2.5-flash",
-            "gemini-2-pro-exp"
-            # ပုံမှန်သုံးရန်
-        ], 
+        "AI Model", 
+        ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash"], 
         index=0
     )
 
@@ -460,7 +577,7 @@ with st.sidebar:
 
 # ⚠️ STOP IF NO KEY
 if not st.session_state.user_api_key:
-    st.warning("⚠️ Please enter your Gemini API Key in the Sidebar to continue.")
+    st.warning("👋 Welcome! Please enter your Gemini API Key in the Sidebar to start.")
     st.stop()
 
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
@@ -503,9 +620,9 @@ with t1:
                     ROLE: You are a famous Myanmar Movie Recap Narrator.
                     TONE: Dramatic, Flowing, Suspenseful.
                     STRICT WRITING RULES:
-                    1. Use dramatic vocabulary ('မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရတယ်').
+                    1. Use dramatic vocabulary ('မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရပါတယ်').
                     2. Connect sentences smoothly using Cause & Effect.
-                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', ''.
+                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ'.
                     4. Do not use robotic fillers.
                     """
                     
@@ -579,22 +696,32 @@ with t1:
             if "Audio" in export_format:
                 p_bar.progress(100, text="✅ Done!")
             else:
-                p_bar.progress(50, text="🎞️ Rendering Video...")
+                p_bar.progress(50, text="🎞️ Rendering Video (Applying Effects)...")
+                
+                # ❄️ APPLY FREEZE EFFECT IF SELECTED
+                video_source = FILE_INPUT
+                if freeze_interval > 0:
+                    st.toast(f"❄️ Freezing video every {freeze_option}...")
+                    freeze_success = process_video_with_freeze(FILE_INPUT, FILE_VIDEO_FREEZE, freeze_interval, freeze_duration=3.0)
+                    if freeze_success:
+                        video_source = FILE_VIDEO_FREEZE
+                    else:
+                        st.warning("Freeze effect failed, using original video.")
+
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
                 aud_dur = get_duration(FILE_VOICE)
-                vid_dur = get_duration(FILE_INPUT) / video_speed
+                vid_dur = get_duration(video_source) / video_speed
                 
-                cmd = ['ffmpeg', '-y', '-i', FILE_INPUT, '-i', FILE_VOICE, 
+                # Logic: If audio is longer, loop video or freeze last frame.
+                # Here we use -stream_loop -1 and -shortest to ensure video matches audio length
+                cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', video_source, '-i', FILE_VOICE, 
                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
-                       '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', FILE_FINAL]
-                
-                if aud_dur > vid_dur:
-                    cmd.insert(4, '-stream_loop'); cmd.insert(5, '-1')
-                    cmd.append('-shortest')
+                       '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
+                       '-shortest', FILE_FINAL]
 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
