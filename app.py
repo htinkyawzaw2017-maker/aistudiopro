@@ -431,7 +431,7 @@ with st.sidebar:
 
     st.divider()
 
-    with st.expander("🔑 API Keys & Model", expanded=True):
+    with st.session_state.api_keys:
         try:
             if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
             else: default_keys = ""
