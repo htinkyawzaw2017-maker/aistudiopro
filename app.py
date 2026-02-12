@@ -534,6 +534,8 @@ with t1:
         audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
         video_speed = st.slider("🎞️ Video Speed (Synced)", 0.5, 4.0, 1.0, 0.1)
 
+        # ... (Inside Tab 1) ...
+
         if st.button("🚀 GENERATE FINAL", use_container_width=True):
             p_bar = st.progress(0, text="Generating Audio...")
             if not txt.strip(): st.error("Script empty!"); st.stop()
@@ -543,18 +545,22 @@ with t1:
             if not success: st.error(msg); st.stop()
             st.session_state.processed_audio_path = FILE_VOICE
 
-            if "Video" in export_format:
+            # 🔥 FIX: Audio Only Logic Added
+            if "Audio" in export_format:
+                p_bar.progress(100, text="✅ Audio Generated Successfully!")
+                time.sleep(0.5)
+                st.rerun() # Refresh to show audio player
+
+            elif "Video" in export_format:
                 p_bar.progress(50, text="🎞️ Mixing Video & Audio...")
                 pts_val = 1.0 / video_speed
                 
-                # 🔥 NEW: FFmpeg Command to mix Video + TTS + BGM
                 inputs = ['-y', '-i', FILE_INPUT, '-i', FILE_VOICE]
                 filter_complex = f"[0:v]setpts={pts_val}*PTS,scale=1920:1080,crop=1920:1080[vzoom]"
                 map_cmd = ['-map', '[vzoom]']
                 
                 if os.path.exists(FILE_BGM) and bgm_up:
                     inputs.extend(['-i', FILE_BGM])
-                    # Mix TTS (Input 1) and BGM (Input 2)
                     filter_complex += f";[2:a]volume={bgm_vol}[bgm];[1:a][bgm]amix=inputs=2:duration=first[aout]"
                     map_cmd.extend(['-map', '[aout]'])
                 else:
@@ -564,15 +570,32 @@ with t1:
                       ['-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', FILE_FINAL]
                 
                 subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
                 if os.path.exists(FILE_FINAL):
                     st.session_state.processed_video_path = FILE_FINAL
-                    p_bar.progress(100, text="Done!")
+                    p_bar.progress(100, text="🎉 Video Complete!")
+                    time.sleep(0.5)
+                    st.rerun() # Refresh to show video player
                 else:
-                    st.error("Video Generation Failed")
+                    st.error("❌ Video Generation Failed")
 
+    # 🔥 FIX: Better Video Display Size (Centered)
     if st.session_state.processed_video_path and "Video" in export_format:
-        st.video(st.session_state.processed_video_path)
-        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("Download Video", f, "final.mp4", use_container_width=True)
+        st.markdown("---")
+        c1, c2, c3 = st.columns([1, 2, 1]) # Use columns to center video
+        with c2:
+            st.success("✨ Final Video Output")
+            st.video(st.session_state.processed_video_path)
+            with open(st.session_state.processed_video_path, "rb") as f: 
+                st.download_button("🎬 Download Video", f, "final_dubbed.mp4", use_container_width=True)
+
+    # 🔥 FIX: Better Audio Player Display
+    if st.session_state.processed_audio_path and "Audio" in export_format:
+        st.markdown("---")
+        st.success("✨ Audio Output")
+        st.audio(st.session_state.processed_audio_path)
+        with open(st.session_state.processed_audio_path, "rb") as f: 
+            st.download_button("🎵 Download MP3", f, "final_voice.mp3", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION (WITH SRT) ===
 with t2:
@@ -603,14 +626,24 @@ with t2:
                 st.session_state.srt_path = FILE_SRT
                 st.success("Done!")
 
+    # ... (Inside Tab 2, at the bottom) ...
+
     if st.session_state.caption_video_path:
-        st.video(st.session_state.caption_video_path)
-        c1, c2 = st.columns(2)
-        with c1:
-            with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download Video", f, "captioned.mp4", use_container_width=True)
+        st.markdown("---")
+        # 🔥 FIX: Better Video Display Size for Captions
+        c1, c2, c3 = st.columns([1, 2, 1]) 
         with c2:
-            # 🔥 NEW: SRT Download Button
-            with open(st.session_state.srt_path, "rb") as f: st.download_button("Download .SRT File", f, "subs.srt", use_container_width=True)
+            st.success("📝 Captioned Video")
+            st.video(st.session_state.caption_video_path)
+            
+            d1, d2 = st.columns(2)
+            with d1:
+                with open(st.session_state.caption_video_path, "rb") as f: 
+                    st.download_button("🎬 Download Video", f, "captioned.mp4", use_container_width=True)
+            with d2:
+                if st.session_state.srt_path and os.path.exists(st.session_state.srt_path):
+                    with open(st.session_state.srt_path, "rb") as f: 
+                        st.download_button("📄 Download .SRT", f, "subs.srt", use_container_width=True)
 
 # === TAB 3: VIRAL SEO ===
 with t3:
