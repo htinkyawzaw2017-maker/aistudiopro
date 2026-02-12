@@ -21,42 +21,33 @@ from google.cloud import texttospeech
 from google.oauth2 import service_account
 
 # ---------------------------------------------------------
-# 🛡️ 1. SESSION & FOLDER ISOLATION (THE FIX)
+# 🛡️ 1. SESSION & FOLDER ISOLATION
 # ---------------------------------------------------------
-# ရှင်းလင်းချက်: User တစ်ယောက်ချင်းစီအတွက် Folder သီးသန့်ဆောက်မည့်စနစ်
-# အရင်လို Folder တစ်ခုတည်းမှာ ဖိုင်တွေ စုမပုံတော့ပါ။
-
 if 'session_id' not in st.session_state:
-    # 32-character unique ID to guarantee NO collisions
     st.session_state.session_id = uuid.uuid4().hex
 
 SID = st.session_state.session_id
-
-# Main Work Directory
 BASE_WORK_DIR = os.path.abspath("user_sessions")
-
-# Create a UNIQUE sub-folder for THIS user only
 USER_SESSION_DIR = os.path.join(BASE_WORK_DIR, SID)
 os.makedirs(USER_SESSION_DIR, exist_ok=True)
 
-# Define clean file paths (No need to append IDs to filenames anymore, the Folder is already unique)
 FILE_INPUT = os.path.join(USER_SESSION_DIR, "input_video.mp4")
 FILE_AUDIO_RAW = os.path.join(USER_SESSION_DIR, "extracted_audio.wav")
 FILE_VOICE = os.path.join(USER_SESSION_DIR, "ai_voice.mp3")
 FILE_FINAL = os.path.join(USER_SESSION_DIR, "final_dubbed_video.mp4")
-
 FILE_CAP_INPUT = os.path.join(USER_SESSION_DIR, "caption_input_video.mp4")
 FILE_CAP_WAV = os.path.join(USER_SESSION_DIR, "caption_audio.wav")
 FILE_CAP_FINAL = os.path.join(USER_SESSION_DIR, "captioned_output.mp4")
 FILE_ASS = os.path.join(USER_SESSION_DIR, "subtitles.ass")
 
 # ---------------------------------------------------------
-# 🎨 UI SETUP
+# 🎨 UI SETUP (Responsive Header & Red Buttons)
 # ---------------------------------------------------------
 st.set_page_config(page_title="Myanmar AI Studio Pro", page_icon="🎬", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
+    /* Global Background */
     .stApp {
         background-image: url("https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=2072&auto=format&fit=crop");
         background-attachment: fixed;
@@ -64,51 +55,83 @@ st.markdown("""
         background-position: center;
         color: #e0e0e0;
     }
+    
+    /* Sidebar Styling */
     [data-testid="stSidebar"] {
         background-color: rgba(10, 25, 47, 0.95);
-        border-right: 1px solid #00d2ff;
+        border-right: 1px solid #FF0000;
     }
-    header[data-testid="stHeader"] {
-        background-color: transparent;
+    
+    /* 🔴 RED BUTTONS STYLE (Bright Red as requested) */
+    .stButton > button {
+        background: linear-gradient(45deg, #FF0000, #B30000) !important;
+        color: white !important;
+        border: 2px solid #FF4444 !important;
+        border-radius: 8px;
+        font-weight: bold;
+        box-shadow: 0px 4px 15px rgba(255, 0, 0, 0.4);
+        transition: all 0.3s ease;
     }
-    button[kind="header"] {
-        color: #00C9FF !important;
-        background-color: rgba(0,0,0,0.5) !important;
-        border: 1px solid #00C9FF !important;
-        box-shadow: 0 0 10px #00C9FF;
+    .stButton > button:hover {
+        transform: scale(1.05);
+        box-shadow: 0px 6px 20px rgba(255, 0, 0, 0.7);
     }
-    .main-header {
+
+    /* 📱 RESPONSIVE HEADER FOR MOBILE */
+    .header-container {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: 15px;
+        padding: 20px;
+        background: rgba(0,0,0,0.4);
+        border-radius: 15px;
+        margin-bottom: 20px;
+    }
+    
+    .header-icon {
+        width: 80px;
+        height: 80px;
+    }
+    
+    .header-text {
         font-family: 'Orbitron', sans-serif;
         background: linear-gradient(90deg, #00C9FF 0%, #92FE9D 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-align: center;
         font-size: 3rem;
         font-weight: 800;
         text-shadow: 0px 0px 30px rgba(0, 201, 255, 0.5);
-        margin-bottom: 20px;
-        margin-top: -50px;
+        margin: 0;
+        line-height: 1.2;
     }
-    div[data-testid="stFileUploader"], div[class="stTextArea"] {
-        background-color: rgba(10, 25, 47, 0.9);
-        border: 1px solid #00d2ff;
-        border-radius: 10px;
-    }
-    .stButton > button {
-        background: linear-gradient(45deg, #ff00cc, #3333ff);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: bold;
+
+    /* Mobile Media Query */
+    @media only screen and (max-width: 600px) {
+        .header-container {
+            flex-direction: column; /* Stack vertically on phone */
+            gap: 10px;
+            padding: 10px;
+        }
+        .header-icon {
+            width: 50px;
+            height: 50px;
+        }
+        .header-text {
+            font-size: 1.8rem; /* Smaller text for mobile */
+            text-align: center;
+        }
     }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
 """, unsafe_allow_html=True)
 
+# Responsive Header HTML
 st.markdown("""
-<div style="display: flex; justify-content: center; align-items: center; gap: 15px;">
-    <img src="https://img.icons8.com/nolan/96/movie-projector.png" width="60"/>
-    <div class="main-header">MYANMAR AI STUDIO PRO</div>
+<div class="header-container">
+    <img src="https://img.icons8.com/nolan/96/movie-projector.png" class="header-icon"/>
+    <h1 class="header-text">MYANMAR AI STUDIO PRO</h1>
 </div>
 """, unsafe_allow_html=True)
 
@@ -120,8 +143,8 @@ if 'final_script' not in st.session_state: st.session_state.final_script = ""
 if 'processed_video_path' not in st.session_state: st.session_state.processed_video_path = None
 if 'processed_audio_path' not in st.session_state: st.session_state.processed_audio_path = None
 if 'caption_video_path' not in st.session_state: st.session_state.caption_video_path = None
-if 'api_keys' not in st.session_state: st.session_state.api_keys = []
 if 'google_creds' not in st.session_state: st.session_state.google_creds = None
+if 'user_api_key' not in st.session_state: st.session_state.user_api_key = ""
 
 # ---------------------------------------------------------
 # 🛠️ HELPER FUNCTIONS
@@ -157,12 +180,9 @@ def get_duration(path):
     except: return 0.0
 
 def download_font():
-    # Save font in the user's isolated directory or a shared cache
-    # Using shared cache for font is fine
     font_dir = os.path.abspath("fonts_cache")
     os.makedirs(font_dir, exist_ok=True)
     font_path = os.path.join(font_dir, "Padauk-Bold.ttf")
-    
     if not os.path.exists(font_path):
         url = "https://github.com/googlefonts/padauk/raw/main/fonts/ttf/Padauk-Bold.ttf"
         try:
@@ -235,8 +255,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
     parts = re.split(r'(\[.*?\])', full_text)
     audio_segments = []
     chunk_idx = 0
-
-    # Ensure output_file path is safe
     output_dir = os.path.dirname(output_file)
     
     for part in parts:
@@ -244,14 +262,11 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if not part: continue
         part_lower = part.lower()
 
-        # Handle [p] tag as silence
         if part_lower == "[p]":
             chunk_filename = os.path.join(output_dir, f"chunk_{chunk_idx}_silence.mp3")
             cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=24000:cl=mono', '-t', '1', '-q:a', '9', chunk_filename]
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if os.path.exists(chunk_filename):
-                audio_segments.append(chunk_filename)
-                chunk_idx += 1
+            if os.path.exists(chunk_filename): audio_segments.append(chunk_filename); chunk_idx += 1
             continue
 
         if part_lower in EMOTION_MAP:
@@ -268,7 +283,6 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
         if not processed_text.strip(): continue
         
         chunk_filename = os.path.join(output_dir, f"chunk_{chunk_idx}.mp3")
-        
         success = False
         if engine == "Google Cloud TTS" and st.session_state.google_creds:
             g_rate = 1.0 + (current_rate / 100.0)
@@ -286,27 +300,17 @@ def generate_audio_with_emotions(full_text, lang, gender, base_mode, output_file
 
     if not audio_segments: return False, "No audio generated"
     
-    # Merge all chunks
     concat_list = os.path.join(output_dir, "concat_list.txt")
     with open(concat_list, "w") as f:
-        for seg in audio_segments: 
-            f.write(f"file '{seg}'\n")
+        for seg in audio_segments: f.write(f"file '{seg}'\n")
             
     try:
         subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', concat_list, '-c', 'copy', output_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True, "Success"
     except Exception as e: return False, str(e)
 
-# ---------------------------------------------------------
-# 🔢 TEXT NORMALIZATION
-# ---------------------------------------------------------
 def num_to_burmese_spoken(num_str):
     try:
-        if "." in num_str:
-            parts = num_str.split(".")
-            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-                left = num_to_burmese_spoken(parts[0]); right = num_to_burmese_spoken(parts[1]) 
-                return f"{left} ဒသမ {right}"
         num_str = num_str.replace(",", "")
         n = int(num_str)
         if n == 0: return "သုည"
@@ -337,37 +341,36 @@ def normalize_text_for_tts(text):
     pron_dict = load_pronunciation_dict()
     sorted_keys = sorted(pron_dict.keys(), key=len, reverse=True)
     for original in sorted_keys:
-        fixed_sound = pron_dict[original]
-        pattern = re.compile(re.escape(original), re.IGNORECASE)
-        text = pattern.sub(fixed_sound, text)
+        text = re.compile(re.escape(original), re.IGNORECASE).sub(pron_dict[original], text)
     text = text.replace("၊", ", ").replace("။", ". ").replace("[p]", "... ") 
     text = re.sub(r'\b\d+(?:\.\d+)?\b', lambda x: num_to_burmese_spoken(x.group()), text)
-    text = text.replace("လုံလောက် တဲ့", "လုံလောက်တဲ့").replace("လုံလောက်သော", "လုံလောက်တဲ့")
-    text = text.replace("\n", " ")
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
 # ---------------------------------------------------------
-# 🧠 AI ENGINE (GEMINI)
+# 🧠 AI ENGINE (API KEY FIX)
 # ---------------------------------------------------------
-def get_model(api_key, model_name):
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
-
-def generate_with_retry(prompt):
-    keys = st.session_state.api_keys
-    # 🔥 Use 1.5 Pro by default for stability, or user choice
-    model_name = st.session_state.get("selected_model", "gemini-2.5-flash") 
+# New Logic: Directly use the user-provided key. No secrets loop.
+def generate_content(prompt, image_input=None):
+    api_key = st.session_state.user_api_key
+    if not api_key:
+        return "❌ Please enter your Gemini API Key in the sidebar first."
     
-    custom_rules = load_custom_dictionary()
-    if custom_rules: prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}"
-    for i, key in enumerate(keys):
-        try:
-            model = get_model(key, model_name)
-            response = model.generate_content(prompt)
-            return response.text
-        except: continue
-    return "AI Error: All keys failed."
+    genai.configure(api_key=api_key)
+    model_name = st.session_state.get("selected_model", "gemini-1.5-pro")
+    
+    try:
+        model = genai.GenerativeModel(model_name)
+        custom_rules = load_custom_dictionary()
+        full_prompt = f"RULES:\n{custom_rules}\n\nTASK:\n{prompt}" if custom_rules else prompt
+        
+        if image_input:
+            response = model.generate_content([image_input, full_prompt])
+        else:
+            response = model.generate_content(full_prompt)
+        return response.text
+    except Exception as e:
+        return f"AI Error: {str(e)}"
 
 # ---------------------------------------------------------
 # 📝 .ASS SUBTITLE
@@ -399,13 +402,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_path
 
 # ---------------------------------------------------------
-# 🖥️ MAIN UI & SIDEBAR
+# 🖥️ MAIN UI & SIDEBAR (User Input API Key)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ Control Panel")
     
+    # 🔥 API KEY INPUT (MANDATORY & RED BORDER)
+    st.markdown("### 🔑 Enter Your Gemini API Key")
+    user_key = st.text_input("Paste your Key here:", type="password", help="Get a free key from Google AI Studio.")
+    
+    if user_key:
+        st.session_state.user_api_key = user_key.strip()
+        st.success("✅ Key Saved!")
+    else:
+        st.error("⚠️ API Key Required!")
+
+    st.divider()
+
     st.markdown("☁️ **Google Cloud TTS (Optional):**")
-    gcp_file = st.file_uploader("Upload service_account.json", type=["json"], help="Upload your GCP Key here to unlock Pro voices.")
+    gcp_file = st.file_uploader("Upload service_account.json", type=["json"])
     if gcp_file:
         try:
             gcp_data = json.load(gcp_file)
@@ -414,25 +429,11 @@ with st.sidebar:
         except: st.error("❌ Invalid JSON File")
 
     st.divider()
+    st.session_state.selected_model = st.selectbox("Model", ["gemini 2.5 Flash TTS", "gemini-2.5-flash"], index=0)
 
-    with st.expander("🔑 API Keys & Model", expanded=True):
-        try:
-            if "GOOGLE_API_KEYS" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEYS"]
-            elif "GOOGLE_API_KEY" in st.secrets: default_keys = st.secrets["GOOGLE_API_KEY"]
-            else: default_keys = ""
-        except: default_keys = ""
-        api_key_input = st.text_input("Gemini API Keys", value=default_keys, type="password")
-        if api_key_input:
-            st.session_state.api_keys = [k.strip() for k in api_key_input.split(",") if k.strip()]
-        
-        # 🔥 UPDATED MODEL LIST: Removed 2.0-exp if causing issues, Added 1.5 Pro as Default
-        st.session_state.selected_model = st.selectbox("Model", ["gemini-1.5-pro", "gemini-2.5-flash"], index=0)
-
-    # Danger Zone to clear user data manually
     with st.expander("🚨 Danger Zone", expanded=False):
         if st.button("🗑️ Clear My Data"):
             try:
-                # Only clear CURRENT USER'S folder
                 if os.path.exists(USER_SESSION_DIR):
                     shutil.rmtree(USER_SESSION_DIR)
                     os.makedirs(USER_SESSION_DIR, exist_ok=True)
@@ -445,7 +446,10 @@ with st.sidebar:
         for key in st.session_state.keys(): del st.session_state[key]
         st.rerun()
 
-if not st.session_state.api_keys: st.warning("⚠️ Enter Gemini API Keys"); st.stop()
+# ⚠️ STOP IF NO KEY
+if not st.session_state.user_api_key:
+    st.warning("⚠️ Please enter your Gemini API Key in the Sidebar to continue.")
+    st.stop()
 
 t1, t2, t3 = st.tabs(["🎙️ DUBBING STUDIO", "📝 AUTO CAPTION", "🚀 VIRAL SEO"])
 
@@ -455,7 +459,6 @@ with t1:
     with col_up:
         uploaded = st.file_uploader("Upload Video", type=['mp4','mov'], key="dub")
     with col_set:
-        # 🔥 Mode Selection
         task_mode = st.radio("Mode", ["🗣️ Translate (Dubbing)", "👀 AI Narration (Silent Video)"])
         
         if task_mode == "🗣️ Translate (Dubbing)":
@@ -466,16 +469,13 @@ with t1:
         out_lang = st.selectbox("Output Language", ["Burmese", "English"], index=0)
     
     if uploaded:
-        # Save to USER ISOLATED DIRECTORY
         with open(FILE_INPUT, "wb") as f: f.write(uploaded.getbuffer())
         
         if st.button("🚀 Start Magic", use_container_width=True):
             check_requirements()
             p_bar = st.progress(0, text="Starting...")
 
-            # ---------------------------------------------------------
-            # PATH A: TRANSLATION (Dubbing)
-            # ---------------------------------------------------------
+            # PATH A: TRANSLATION
             if task_mode == "🗣️ Translate (Dubbing)":
                 p_bar.progress(20, text="🎤 Listening to Audio...")
                 subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', FILE_AUDIO_RAW], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -487,78 +487,43 @@ with t1:
                     st.session_state.raw_transcript = raw
                     p_bar.progress(50, text="🧠 Translating...")
                     
-                    # 🔥 Dramatic Recap Prompt
                     recap_style_guide = """
                     ROLE: You are a famous Myanmar Movie Recap Narrator.
                     TONE: Dramatic, Flowing, Suspenseful.
-
                     STRICT WRITING RULES:
-                    1. **BETTER VOCABULARY:**
-                       - Instead of 'တွေ့လိုက်တယ်', use 'တွေ့လိုက်ရပါတယ်' or 'မျက်ဝါးထင်ထင် တွေ့လိုက်ရတယ်'.
-                       - Instead of 'ထွက်ပြေးတယ်', use 'ကြောက်လန့်တကြား ထွက်ပြေးသွားခဲ့တယ်'.
-                       - Instead of 'သေသွားတယ်', use 'အသက်ပါ ဆုံးရှုံးသွားတယ်'.
-
-                    2. **CONNECTING SENTENCES:**
-                       - **COMBINE** actions using Cause & Effect (Use 'ဒါကြောင့်', 'ထို့နောက်', 'မထင်မှတ်ဘဲ').
-                       - Example: "သရဲကို တွေ့လိုက်ရတဲ့အတွက် ကြောက်လန့်ပြီး ချက်ချင်းပဲ ထွက်ပြေးသွားပါ‌တယ်".
-
-                    3. **SENTENCE ENDINGS:**
-                       - Use 'ပါတော့တယ်', 'ခဲ့ပါတယ်', 'လေ', 'လိုက်ပါတော့သည်'. Mix them up.
-
-                    4. **FORBIDDEN:** Do NOT use 'ပေါ့လေ', 'နော်', 'ဗျ', 'အဲဒီတော့', 'ဗြုန်းကနဲ့'. Use 'ရုတ်တရက်' instead.
+                    1. Use dramatic vocabulary ('မျက်ဝါးထင်ထင် တွေ့ရှိလိုက်ရတယ်').
+                    2. Connect sentences smoothly using Cause & Effect.
+                    3. End sentences naturally with 'ပါတော့တယ်', 'ခဲ့ပါတယ်', ''.
+                    4. Do not use robotic fillers.
                     """
                     
                     if in_lang == out_lang:
-                        prompt = f"""{recap_style_guide}
-                        TASK: Rewrite the input into a flowing, dramatic Movie Recap script.
-                        Input: '{raw}'"""
+                        prompt = f"""{recap_style_guide}\nTASK: Rewrite into flowing Recap script.\nInput: '{raw}'"""
                     else:
-                        prompt = f"""{recap_style_guide}
-                        TASK: Translate the {in_lang} text into a flowing, dramatic Burmese Movie Recap script.
-                        Input: '{raw}'"""
+                        prompt = f"""{recap_style_guide}\nTASK: Translate to Burmese Recap script.\nInput: '{raw}'"""
                     
-                    st.session_state.final_script = generate_with_retry(prompt)
+                    st.session_state.final_script = generate_content(prompt)
 
-            # ---------------------------------------------------------
-            # PATH B: AI NARRATION (Vision)
-            # ---------------------------------------------------------
+            # PATH B: AI NARRATION (VISION)
             else:
                 p_bar.progress(20, text="👀 AI is watching video...")
                 try:
-                    if not st.session_state.api_keys:
-                        st.error("Please enter Gemini API Key first!")
-                        st.stop()
-                        
-                    genai.configure(api_key=st.session_state.api_keys[0])
+                    genai.configure(api_key=st.session_state.user_api_key)
                     video_file = genai.upload_file(path=FILE_INPUT)
                     
-                    # Wait for processing
                     while video_file.state.name == "PROCESSING":
                         time.sleep(2)
                         video_file = genai.get_file(video_file.name)
 
                     p_bar.progress(50, text="✍️ Writing Script...")
-                    
-                    # Vision Prompt
                     prompt = f"""
-                    ROLE: You are a professional Video Narrator/YouTuber.
-                    TASK: Watch this video and write a voiceover script in {out_lang}.
+                    ROLE: Professional Video Narrator.
+                    TASK: Write a voiceover script in {out_lang}.
                     STYLE: {vibe}.
-                    
-                    RULES:
-                    1. Describe what is happening on screen naturally as if you are doing it.
-                    2. Match the pacing of the video.
-                    3. Use engaging, spoken-style language (For Burmese: Use 'ပါတယ်', '', '', 'ကြည့်လိုက်ပါဦး').
-                    4. Do NOT say 'The video shows...'. Just narrate it like a Story/Vlog.
-                    5. Keep it fun and engaging.
+                    RULES: Describe actions naturally. Match video pacing. Use engaging language.
                     """
-                    
-                    # Ensure we use 1.5 Pro or User Selection
-                    model = genai.GenerativeModel(model_name=st.session_state.selected_model)
-                    response = model.generate_content([video_file, prompt])
-                    st.session_state.final_script = response.text
-                    genai.delete_file(video_file.name) # Cleanup
-                    
+                    st.session_state.final_script = generate_content(prompt, image_input=video_file)
+                    genai.delete_file(video_file.name)
                 except Exception as e:
                     st.error(f"AI Vision Error: {e}")
                     st.stop()
@@ -566,37 +531,14 @@ with t1:
             p_bar.progress(100, text="✅ Script Ready!")
             st.rerun()
         
-        txt = st.session_state.final_script if st.session_state.final_script else ""
-        word_count = len(txt.split())
-        est_min = round(word_count / 250, 1)
-        st.caption(f"⏱️ Est. Duration: ~{est_min} mins")
-        
-        c_opt1, c_opt2 = st.columns(2)
-        with c_opt1:
-            refine_label = f"✨ Refine: {out_lang} Recap Style"
-            if st.button(refine_label, use_container_width=True):
-                with st.spinner("Refining..."):
-                    prompt = f"""Act as a professional {out_lang} Movie Recap Narrator. Rewrite input into Recap Script. RULES: 1. Use ~250 wpm. 2. Add [p], [action], [sad]. 3. No Summarization. Input: "{st.session_state.final_script}" """
-                    st.session_state.final_script = generate_with_retry(prompt)
-                    st.rerun()
-
-        with c_opt2:
-            if st.button("↩️ Reset Script", use_container_width=True):
-                st.session_state.final_script = st.session_state.raw_transcript
-                st.rerun()
-
         txt = st.text_area("Final Script", st.session_state.final_script, height=200)
 
         st.markdown("---")
         st.markdown("#### ⚙️ Rendering Options")
         
         tts_engine = st.radio("Voice Engine", ["Edge TTS (Free)", "Google Cloud TTS (Pro)"], horizontal=True)
-        if tts_engine == "Google Cloud TTS (Pro)" and not st.session_state.google_creds:
-            st.error("⚠️ Please upload 'service_account.json' in Settings Sidebar to use Google Cloud TTS.")
-
         c_fmt, c_spd = st.columns([1, 1.2]) 
-        with c_fmt:
-            export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
+        with c_fmt: export_format = st.radio("Export Format:", ["🎬 Video (MP4)", "🎵 Audio Only (MP3)"], horizontal=True)
         with c_spd:
             audio_speed = st.slider("🔊 Audio Speed", 0.5, 2.0, 1.0, 0.05)
             video_speed = st.slider("🎞️ Video Speed", 0.5, 4.0, 1.0, 0.1)
@@ -613,78 +555,48 @@ with t1:
         if st.button(btn_label, use_container_width=True):
             p_bar = st.progress(0, text="🚀 Initializing...")
             
-            # Step 1: Check Script
-            if not txt.strip():
-                st.error("❌ Script is empty! Please generate or write a script first.")
-                st.stop()
+            if not txt.strip(): st.error("❌ Script is empty!"); st.stop()
 
-            # Step 2: Audio Generation
-            p_bar.progress(30, text="🔊 Generating Neural Speech...")
+            p_bar.progress(30, text="🔊 Generating Speech...")
             try:
-                # Use Isolated paths
                 success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
-                if not success:
-                    st.error(f"❌ Audio Gen Failed: {msg}")
-                    st.stop()
+                if not success: st.error(f"❌ Audio Failed: {msg}"); st.stop()
                 st.session_state.processed_audio_path = FILE_VOICE
             except Exception as e: st.error(f"Audio Error: {e}"); st.stop()
             
             if "Audio" in export_format:
-                if os.path.exists(FILE_VOICE) and os.path.getsize(FILE_VOICE) > 0:
-                    p_bar.progress(100, text="✅ Audio Generated!")
-                else:
-                    st.error("❌ Audio generation failed. Zero byte file.")
+                p_bar.progress(100, text="✅ Done!")
             else:
-                # Step 3: Video Rendering (Robust)
-                p_bar.progress(50, text="🎞️ Processing Video (This may take a moment)...")
-                
+                p_bar.progress(50, text="🎞️ Rendering Video...")
                 pts_val = 1.0 / video_speed
                 w_s = int(1920 * zoom_val); h_s = int(1080 * zoom_val)
                 if w_s % 2 != 0: w_s += 1
                 if h_s % 2 != 0: h_s += 1
                 
-                vid_dur = get_duration(FILE_INPUT) / video_speed
                 aud_dur = get_duration(FILE_VOICE)
+                vid_dur = get_duration(FILE_INPUT) / video_speed
                 
-                # Use -preset ultrafast for speed and -y to overwrite
                 cmd = ['ffmpeg', '-y', '-i', FILE_INPUT, '-i', FILE_VOICE, 
                        '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
-                       '-map', '[vzoom]', '-map', '1:a', 
-                       '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
-                       FILE_FINAL]
+                       '-map', '[vzoom]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', FILE_FINAL]
                 
                 if aud_dur > vid_dur:
-                    cmd = ['ffmpeg', '-y', '-stream_loop', '-1', '-i', FILE_INPUT, '-i', FILE_VOICE, 
-                           '-filter_complex', f"[0:v]setpts={pts_val}*PTS,scale={w_s}:{h_s},crop=1920:1080[vzoom]", 
-                           '-map', '[vzoom]', '-map', '1:a', 
-                           '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', 
-                           '-shortest', FILE_FINAL]
+                    cmd.insert(4, '-stream_loop'); cmd.insert(5, '-1')
+                    cmd.append('-shortest')
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                # Check for Success
-                if result.returncode == 0 and os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
-                    p_bar.progress(100, text="🎉 Video Complete!")
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if os.path.exists(FILE_FINAL) and os.path.getsize(FILE_FINAL) > 1000:
                     st.session_state.processed_video_path = FILE_FINAL
-                else:
-                    st.error("❌ Video generation failed.")
-                    with st.expander("View Error Details"):
-                        st.text(result.stderr)
+                    p_bar.progress(100, text="🎉 Done!")
+                else: st.error("❌ Video Generation Failed")
 
-    # Display Results with Safe Checks
     if st.session_state.processed_video_path and "Video" in export_format:
-        if os.path.exists(st.session_state.processed_video_path):
-            st.video(st.session_state.processed_video_path)
-            with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
-        else:
-            st.warning("⚠️ Video file missing. Please regenerate.")
+        st.video(st.session_state.processed_video_path)
+        with open(st.session_state.processed_video_path, "rb") as f: st.download_button("🎬 Download Video", f, "dubbed.mp4", use_container_width=True)
 
     if st.session_state.processed_audio_path:
-        if os.path.exists(st.session_state.processed_audio_path):
-            st.audio(st.session_state.processed_audio_path)
-            with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
-        else:
-            st.warning("⚠️ Audio file missing.")
+        st.audio(st.session_state.processed_audio_path)
+        with open(st.session_state.processed_audio_path, "rb") as f: st.download_button("🎵 Download Audio", f, "voice.mp3", use_container_width=True)
 
 # === TAB 2: AUTO CAPTION ===
 with t2:
@@ -704,27 +616,20 @@ with t2:
                     p_bar.progress(int((i/len(segments))*50), text=f"🧠 Translating...")
                     txt = seg['text'].strip()
                     if txt:
-                        burmese = generate_with_retry(f"Translate to Burmese. Short. Input: '{txt}'")
+                        burmese = generate_content(f"Translate to Burmese. Short. Input: '{txt}'")
                         trans_segments.append({'start': seg['start'], 'end': seg['end'], 'text': burmese})
                         time.sleep(0.3)
                 p_bar.progress(90, text="✍️ Burning Subtitles...")
-                
                 generate_ass_file(trans_segments, font_path, FILE_ASS)
                 font_dir = os.path.dirname(font_path)
                 subprocess.run(['ffmpeg', '-y', '-i', FILE_CAP_INPUT, '-vf', f"ass={FILE_ASS}:fontsdir={font_dir}", '-c:a', 'copy', '-c:v', 'libx264', '-preset', 'ultrafast', FILE_CAP_FINAL], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
                 if os.path.exists(FILE_CAP_FINAL):
                     st.session_state.caption_video_path = FILE_CAP_FINAL
                     p_bar.progress(100, text="Done!")
-                else:
-                    st.error("❌ Caption generation failed.")
 
     if st.session_state.caption_video_path:
-        if os.path.exists(st.session_state.caption_video_path):
-            st.video(st.session_state.caption_video_path)
-            with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4", use_container_width=True)
-        else:
-            st.warning("⚠️ File not found.")
+        st.video(st.session_state.caption_video_path)
+        with open(st.session_state.caption_video_path, "rb") as f: st.download_button("Download", f, "captioned.mp4", use_container_width=True)
 
 # === TAB 3: VIRAL SEO ===
 with t3:
@@ -733,7 +638,7 @@ with t3:
         if st.button("Generate Metadata", use_container_width=True):
             with st.spinner("Analyzing..."):
                 prompt = f"""Based on: {st.session_state.final_script}\nGenerate:\n1. 5 Clickbait Titles (Burmese)\n2. 10 Hashtags\n3. Description"""
-                seo_result = generate_with_retry(prompt)
+                seo_result = generate_content(prompt)
                 st.success("SEO Generated!")
                 st.code(seo_result, language="markdown")
     else:
