@@ -6,4 +6,4 @@ pydub
 requests
 google-cloud-texttospeech
 google-auth
-
+yt-dlp
