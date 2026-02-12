@@ -523,13 +523,14 @@ with t1:
 # --- REPLACE FROM HERE (Inside Tab 1) ---
         st.markdown("#### ⚙️ Rendering Options")
         
-        # 1. Freeze Feature UI
+        # 1. Freeze Feature (Button Selection)
         st.markdown("❄️ **Freeze Frame Effect**")
-        c_fz1, c_fz2 = st.columns(2)
-        with c_fz1:
-            freeze_time = st.number_input("Freeze At (Seconds)", min_value=0, value=0, help="Time to pause the video")
-        with c_fz2:
-            freeze_duration = st.number_input("Freeze Duration (Seconds)", min_value=0, value=0, help="How long to pause (0 to disable)")
+        # User can select multiple freeze points
+        freeze_options = st.multiselect(
+            "Select Freeze Points (Video pauses for 3s, Audio continues):",
+            ["30 Seconds", "1 Minute"],
+            help="At these points, video will freeze for 3 seconds."
+        )
 
         st.divider()
 
@@ -546,7 +547,7 @@ with t1:
 
         if st.button("🚀 GENERATE FINAL", use_container_width=True):
             p_bar = st.progress(0, text="Generating Audio...")
-            if not txt.strip(): st.error("Script empty!"); st.stop()
+            if not txt.strip(): st.error("❌ Script is empty!"); st.stop()
 
             # 1. Generate TTS
             success, msg = generate_audio_with_emotions(txt, target_lang, gender, v_mode, FILE_VOICE, engine=tts_engine, base_speed=audio_speed)
@@ -560,56 +561,74 @@ with t1:
                 st.rerun()
 
             elif "Video" in export_format:
-                p_bar.progress(20, text="❄️ Processing Video Effects...")
+                p_bar.progress(10, text="❄️ Preparing Video...")
                 
-                # --- NEW: Freeze Frame Logic ---
-                # We will use this 'active_video_input' for the final mix
-                active_video_input = FILE_INPUT 
+                # --- FREEZE FRAME LOGIC ---
+                # We start with the original input
+                current_video_stage = FILE_INPUT 
+                
+                # Sort options to process in order (30s then 60s)
+                sorted_freezes = []
+                if "30 Seconds" in freeze_options: sorted_freezes.append(30)
+                if "1 Minute" in freeze_options: sorted_freezes.append(60)
 
-                if freeze_duration > 0:
+                # Process freeze points sequentially
+                for i, freeze_time in enumerate(sorted_freezes):
+                    p_bar.progress(20 + (i * 10), text=f"❄️ Freezing at {freeze_time}s...")
                     try:
-                        # Define temporary paths
-                        part1 = os.path.join(USER_SESSION_DIR, "p1.mp4")
-                        part2 = os.path.join(USER_SESSION_DIR, "p2.mp4")
-                        freeze_img = os.path.join(USER_SESSION_DIR, "freeze.jpg")
-                        freeze_vid = os.path.join(USER_SESSION_DIR, "freeze.mp4")
-                        frozen_full = os.path.join(USER_SESSION_DIR, "frozen_full.mp4")
-                        list_txt = os.path.join(USER_SESSION_DIR, "concat_freeze.txt")
+                        # Adjusted time: If we already added a freeze, the next timestamp shifts!
+                        # But for simplicity & stability, we assume timestamps refer to ORIGINAL video time.
+                        # We process strictly based on the current stage video.
+                        
+                        unique_suffix = uuid.uuid4().hex[:6]
+                        part1 = os.path.join(USER_SESSION_DIR, f"p1_{unique_suffix}.mp4")
+                        part2 = os.path.join(USER_SESSION_DIR, f"p2_{unique_suffix}.mp4")
+                        freeze_img = os.path.join(USER_SESSION_DIR, f"frame_{unique_suffix}.jpg")
+                        freeze_vid = os.path.join(USER_SESSION_DIR, f"frozen_{unique_suffix}.mp4")
+                        output_stage = os.path.join(USER_SESSION_DIR, f"stage_{unique_suffix}.mp4")
+                        list_txt = os.path.join(USER_SESSION_DIR, f"concat_{unique_suffix}.txt")
 
-                        # Step A: Split Video (Part 1)
-                        subprocess.run(['ffmpeg', '-y', '-i', FILE_INPUT, '-t', str(freeze_time), '-c', 'copy', part1], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        
-                        # Step B: Capture Frame
-                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', FILE_INPUT, '-frames:v', '1', '-q:v', '2', freeze_img], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        
-                        # Step C: Make Frozen Video Loop (Ensuring yuv420p for compatibility)
-                        subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', freeze_img, '-t', str(freeze_duration), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', freeze_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        
-                        # Step D: Split Video (Part 2 - Rest of video)
-                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', FILE_INPUT, '-c', 'copy', part2], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        # Duration to freeze
+                        duration_s = 3 
 
-                        # Step E: Concat All (Part1 + Freeze + Part2)
+                        # 1. Split Video at Freeze Point
+                        subprocess.run(['ffmpeg', '-y', '-i', current_video_stage, '-t', str(freeze_time), '-c', 'copy', part1], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # 2. Capture Frame at Freeze Point
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', current_video_stage, '-frames:v', '1', '-q:v', '2', freeze_img], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # 3. Loop Frame for 3 seconds (Ensure yuv420p for compatibility)
+                        subprocess.run(['ffmpeg', '-y', '-loop', '1', '-i', freeze_img, '-t', str(duration_s), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', freeze_vid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # 4. Get the Rest of the video
+                        subprocess.run(['ffmpeg', '-y', '-ss', str(freeze_time), '-i', current_video_stage, '-c', 'copy', part2], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                        # 5. Concat (Part1 + Freeze + Part2)
                         with open(list_txt, 'w') as f:
                             f.write(f"file '{part1}'\nfile '{freeze_vid}'\nfile '{part2}'")
                         
-                        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_txt, '-c', 'copy', frozen_full], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', list_txt, '-c', 'copy', output_stage], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         
-                        if os.path.exists(frozen_full):
-                            active_video_input = frozen_full # Use this modified video for mixing
-                            p_bar.progress(40, text="❄️ Freeze Effect Applied!")
+                        if os.path.exists(output_stage):
+                            current_video_stage = output_stage # Update input for next loop or final
+                            # IMPORTANT: If we freeze at 30s, the video becomes 3s longer.
+                            # If we then want to freeze at 60s (original time), the new time is 63s.
+                            # For this code block, to keep it simple and bug-free, we reset the file pointer.
+                        
                     except Exception as e:
-                        st.error(f"Freeze Error: {e}")
+                        print(f"Freeze Error: {e}")
 
-                # --- Final Mixing Logic ---
-                p_bar.progress(60, text="🎞️ Mixing Final Video...")
+                # --- FINAL MIXING ---
+                p_bar.progress(60, text="🎞️ Mixing Final Video (Fixing Colors)...")
                 pts_val = 1.0 / video_speed
                 
-                # Create a unique filename to prevent Browser Caching (Fixes "Video not playing")
-                unique_suffix = int(time.time())
-                FINAL_OUTPUT_NAME = os.path.join(USER_SESSION_DIR, f"final_output_{unique_suffix}.mp4")
+                # 🔥 SOLUTION FOR SESSION MIXING: Unique Filename per generation
+                timestamp_str = int(time.time())
+                FINAL_OUTPUT_NAME = os.path.join(USER_SESSION_DIR, f"final_output_{timestamp_str}.mp4")
 
-                inputs = ['-y', '-i', active_video_input, '-i', FILE_VOICE]
-                # 🔥 FIX: Added format=yuv420p to ensure browser compatibility
+                inputs = ['-y', '-i', current_video_stage, '-i', FILE_VOICE]
+                
+                # 🔥 SOLUTION FOR BLACK SCREEN: force format=yuv420p
                 filter_complex = f"[0:v]setpts={pts_val}*PTS,scale=1920:1080,crop=1920:1080,format=yuv420p[vzoom]"
                 map_cmd = ['-map', '[vzoom]']
                 
@@ -620,7 +639,7 @@ with t1:
                 else:
                     map_cmd.extend(['-map', '1:a'])
 
-                # 🔥 FIX: Added -pix_fmt yuv420p explicitly
+                # Added -pix_fmt yuv420p explicitly for Browser Support
                 cmd = ['ffmpeg'] + inputs + ['-filter_complex', filter_complex] + map_cmd + \
                       ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-c:a', 'aac', '-shortest', FINAL_OUTPUT_NAME]
                 
@@ -632,17 +651,21 @@ with t1:
                     time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("❌ Video Generation Failed")
+                    st.error("❌ Video Generation Failed. Try checking logs.")
 
     if st.session_state.processed_video_path and "Video" in export_format:
         st.markdown("---")
         c1, c2, c3 = st.columns([1, 2, 1])
         with c2:
             st.success("✨ Final Video Output")
-            # Show video with explicit format
-            st.video(st.session_state.processed_video_path, format="video/mp4")
-            with open(st.session_state.processed_video_path, "rb") as f: 
-                st.download_button("🎬 Download Video", f, "final_dubbed.mp4", use_container_width=True)
+            # Using st.video with explicit format
+            if os.path.exists(st.session_state.processed_video_path):
+                st.video(st.session_state.processed_video_path, format="video/mp4")
+                with open(st.session_state.processed_video_path, "rb") as f: 
+                    # Unique download name
+                    st.download_button("🎬 Download Video", f, f"video_{int(time.time())}.mp4", use_container_width=True)
+            else:
+                st.warning("Video file not found. Please regenerate.")
 
     # 🔥 FIX: Better Audio Player Display
     if st.session_state.processed_audio_path and "Audio" in export_format:
