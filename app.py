@@ -173,10 +173,39 @@ if "myanmar_content" in st.session_state:
             else:
                 st.warning("ကျေးဇူးပြု၍ အသံထုတ်ရန် စာသား အနည်းငယ် ထည့်သွင်းပေးပါ။")
 
+    # Tab 3: AI Video Recap & Hooks
     with tab3:
-        st.subheader("Original English Script & Subtitles")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.text_area("English Transcript", st.session_state.get("en_transcript", ""), height=250)
-        with col_b:
-            st.text_area("English Subtitles (.srt)", st.session_state.get("en_srt", ""), height=250)
+        st.subheader("AI Content Multiplier (Groq Llama-3)")
+        if st.button("✨ Generate Recap, Timestamps & Social Hooks"):
+            if not groq_api_key:
+                st.error("ကျေးဇူးပြု၍ Sidebar တွင် Groq API Key ထည့်ပေးပါ။")
+            else:
+                with st.spinner("အနှစ်ချုပ်နှင့် Hook စာသားများ ရေးသားနေပါသည်..."):
+                    try:
+                        groq_client = Groq(api_key=groq_api_key)
+                        prompt = f"""
+                        Analyze this transcript and generate in Burmese:
+                        1. **Short Executive Summary** (2-3 sentences)
+                        2. **Key Takeaways** (Bullet points)
+                        3. **Viral Social Media Hooks** (For TikTok/Facebook Reels)
+                        4. **YouTube Description & Timestamps**
+
+                        Transcript:
+                        {st.session_state['transcript']}
+                        """
+                        
+                        chat_completion = groq_client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": "You are a professional social media and video content creator."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            model="llama-3.3-70b-versatile",
+                        )
+                        
+                        st.session_state["ai_recap"] = chat_completion.choices[0].message.content
+                    except Exception as e:
+                        st.error(f"AI Generation Error: {str(e)}")
+
+        if "ai_recap" in st.session_state:
+            st.markdown(st.session_state["ai_recap"])
+            st.download_button("📥 Download Recap (.txt)", st.session_state["ai_recap"], file_name="recap.txt")
