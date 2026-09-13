@@ -1,3 +1,1 @@
 ffmpeg
-fonts-noto-core
-fonts-noto-ui-core
