@@ -33,10 +33,14 @@ def convert_seconds_to_srt_time(seconds: float) -> str:
 def generate_srt(segments) -> str:
     srt_output = []
     for i, seg in enumerate(segments, 1):
-        start = convert_seconds_to_srt_time(seg.start)
-        end = convert_seconds_to_srt_time(seg.end)
-        text = seg.text.strip()
-        srt_output.append(f"{i}\n{start} --> {end}\n{text}\n")
+        # seg သည် dictionary ဖြစ်နေနိုင်သလို object လည်း ဖြစ်နိုင်သောကြောင့် ၂ မျိုးလုံးအဆင်ပြေအောင် ရေးသားခြင်း
+        start_sec = seg.get('start') if isinstance(seg, dict) else getattr(seg, 'start', 0)
+        end_sec = seg.get('end') if isinstance(seg, dict) else getattr(seg, 'end', 0)
+        text = seg.get('text') if isinstance(seg, dict) else getattr(seg, 'text', '')
+        
+        start = convert_seconds_to_srt_time(start_sec)
+        end = convert_seconds_to_srt_time(end_sec)
+        srt_output.append(f"{i}\n{start} --> {end}\n{text.strip()}\n")
     return "\n".join(srt_output)
 
 async def generate_voiceover(text: str, voice: str, output_path: str):
