@@ -110,7 +110,7 @@ if uploaded_file:
             with st.spinner("အဆင့် (၂/၂): မြန်မာဘာသာသို့ ပြန်ဆိုပြီး Video Recap ထုတ်ပေးနေပါသည်..."):
                 try:
                     genai.configure(api_key=gemini_api_key)
-                    model = genai.GenerativeModel("gemini-pro")
+                    model = genai.GenerativeModel("gemini 2.5 flash")
                     
                     prompt = f"""
                     You are an expert video content creator and bilingual translator.
